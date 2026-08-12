@@ -21,9 +21,7 @@ Different models may bring different priors, reasoning, capabilities, habits, an
 
 ### Role
 
-A harness `role` can affect model selection and the initial system prompt. It differs from an assignment and may overlap with model heterogeneity.
-
-Role → model mapping is user-owned runtime configuration. Ask when it is missing for the invocation; never infer it from role names or persist it in distributed skill files. Choose roles for known instructions and suitability, then use the mapping to identify actual model differences.
+A harness `role` can select a model, system prompt, tools, isolation, or other runtime behavior. Inspect the current harness and choose roles for the contribution they can actually perform; do not infer capability from a role name alone.
 
 ### Assignment
 
@@ -137,13 +135,9 @@ Use fast agents for breadth and cheap redundancy; deeper or cross-model agents f
 
 Increase diversity, breadth, and redundancy when errors are costly, direct checks are weak, decisions are hard to reverse, or attempts disagree. Keep the ensemble small for direct, easily verified work.
 
-### Persist every invocation
+### Persist compact state
 
-Create `.ensemble/<NNN>-<invocation-slug>/STATE.md` from [`STATE-TEMPLATE.md`](STATE-TEMPLATE.md). Keep it proportional. Before first dispatch on direct work, keep the outcome, runtime configuration, candidate and ground-truth pointers, attempt rows and ownership, and next action current. Add findings, decisions, verification, and briefs only as material facts emerge. This is practice guidance; the template remains authoritative.
-
-`STATE.md` is a compact recovery surface, not a dossier. It stores control facts and pointers; source, tests, maintained docs, briefs, and linked artifacts hold technical truth. Add a [`BRIEF-TEMPLATE.md`](BRIEF-TEMPLATE.md) only when a member needs more context than its row and pointers provide.
-
-Follow the template's [update boundary](STATE-TEMPLATE.md#update-boundary): whenever state changes, make it recoverable from a fresh session, so a later session recovers the invocation rather than finding an empty directory. Coordinators read state first and consult detail only as needed; members read the outcome, their row, optional brief, and ground truth—not conversation history.
+Create `.ensemble/<NNN>-<invocation-slug>/STATE.md` from [`STATE-TEMPLATE.md`](STATE-TEMPLATE.md). Keep only the outcome, coverage, contributions, decisions, candidate, verification, and next action needed for recovery. Use a harness-provided state tool when available; technical truth remains in source, tests, maintained docs, and artifact pointers.
 
 ### Parallelize observation before modification
 
@@ -161,33 +155,20 @@ Do not discard a finding because it is non-blocking. Record its relevance and im
 
 Investigate or ask when plausible meanings would change scope, assignments, composition, or validation. Ambiguity that could shrink scope to a convenient subset is decision-relevant—resolve it against the full coverage the outcome demands. Ignore harmless wording ambiguity.
 
-### Preserve configuration scope
-
-Before maintaining an observed configuration, identify its owner, scope, and lifetime. Distinguish harness capability, user configuration, and invocation input. Runtime mappings guide only the current ensemble unless a durable authority says otherwise.
 
 ### Demand material novelty
 
 Another member or round earns its cost only through a new artifact, observation method, failure mechanism, prior, role behavior, or consequential challenge. Cosmetic variation does not advance the work.
 
-### Maintain the delegation boundary
-
-Members own investigation, design, implementation, tests, edits, and detailed validation; the coordinator owns framing, dispatch, assessment, direction, synthesis, closure, and delivery. Record bounded intervention and its return condition. See [`SKILL.md`](SKILL.md#delegation-boundary) for the contract.
 
 ## Unresolved questions
 
 Preserve uncertainty and its consequences when observations cannot decide. Ask the user when the remaining choice is theirs. Use [`SKILL.md`](SKILL.md) closure criteria; do not invent fixed rounds or consensus thresholds.
 
-## Portability
+## Harness integration
 
-The method requires semantic capabilities, not specific commands:
+Use the strongest native capabilities the harness exposes: agent and model discovery, role-specific prompts and tools, isolated writers, direct artifacts, communication, notifications, and path-safe state tools. Do not recreate a missing capability through mandatory ceremony when an adapter can provide it directly.
 
-- independent agents or attempts;
-- model diversity when exposed;
-- roles that may affect model selection or prompts;
-- assignments that direct concrete contributions;
-- shared subject and ground truth;
-- durable artifacts.
+The method still requires independent attempts, shared ground truth, assigned coverage, comparable artifacts or observations, and one accepted deliverable. If a harness lacks a useful capability, adapt the composition locally; do not turn that fallback into the portable method.
 
-Without model diversity, use materially different roles and assignments and record the loss. Without isolated writers, serialize modification. Without direct member communication, use durable artifacts or coordinator-mediated follow-up.
-
-Git, patches, worktrees, agent names, model identifiers, polling, and timeouts are adapters. Follow the repository and harness instead of encoding one adapter as the method. Apply that discipline twice: version coordination state through repository VCS when available, otherwise use harness durability and record the loss; manage code history under repository conventions; keep the two submissions separate.
+Version coordination state through repository VCS when available. Submit code under repository conventions and keep the two submissions separate.

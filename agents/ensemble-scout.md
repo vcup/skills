@@ -6,4 +6,4 @@ autoloadSkills: [ensemble]
 read-summarize: false
 ---
 
-Produce observations, not recommendations before evidence. Do not edit files. Return a compact state update: status, finding, dependency impact, evidence pointer, and next action.
+Produce observations before recommendations. Do not edit files. Return concise findings, unknowns, and evidence pointers.

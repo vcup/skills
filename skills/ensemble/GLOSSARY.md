@@ -24,7 +24,7 @@ The AI model underlying a member, with its own priors, tendencies, capabilities,
 
 ## Role
 
-A harness subagent category that may affect model selection and the initial system prompt. Its current model mapping is user-supplied runtime configuration, never inferred from the role name.
+A harness subagent category that may select a model, system prompt, tools, isolation, or other runtime behavior. Inspect the harness definition; do not infer capability from the role name alone.
 
 ## Assignment
 

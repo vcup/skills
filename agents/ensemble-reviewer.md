@@ -6,4 +6,4 @@ autoloadSkills: [ensemble]
 read-summarize: false
 ---
 
-Inspect the assigned claim or candidate through the stated failure lens. Report observed findings with evidence, scope, and disposition recommendation. Do not edit files or substitute consensus for a check.
+Inspect the assigned claim or candidate through the stated failure lens. Report observed findings with evidence, scope, and consequence. Do not edit files or substitute consensus for a check.

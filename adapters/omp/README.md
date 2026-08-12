@@ -1,26 +1,23 @@
 # OMP Adapter
 
-## Discovery
+Install online with:
 
-OMP discovers task agents from enabled extension-package `agents/` directories. Loading this repository as an OMP extension therefore exposes:
+```bash
+omp install github:vcup/skills
+```
 
-- `skills/ensemble/` as `ensemble`;
-- `agents/ensemble-*.md` as task agent types.
+OMP enables the plugin from its lockfile and discovers the package's `skills/` and `agents/` directories. No manual clone, local extension path, or separate skill install is required.
 
-The extension entry is intentionally inert. Discovery, not runtime code, provides the adapter behavior.
+## Native capabilities
 
-## Mapping
+| Capability | Implementation |
+|---|---|
+| Portable method | `skills/ensemble/` |
+| Independent research | `ensemble-scout` |
+| Independent assessment | `ensemble-reviewer` |
+| Owned production | `ensemble-worker` |
+| Coordination state | `ensemble_state` custom tool |
 
-| Semantic role | OMP agent | OMP enforcement |
-|---|---|---|
-| scout | `ensemble-scout` | read/search/web-only tool allowlist |
-| reviewer | `ensemble-reviewer` | read/search/inspection tool allowlist |
-| worker | `ensemble-worker` | declared tool allowlist; assignment scope is prompt-enforced |
-| state-writer | `ensemble-state-writer` | `read` and `write`; invocation path and verbatim behavior are prompt-enforced |
-| integrator | `ensemble-integrator` | declared tool allowlist; repository submission boundary is prompt-enforced |
+`ensemble_state` accepts complete replacement content only for paths matching `.ensemble/<NNN>-<slug>/STATE.md`. It resolves paths against the session working directory and writes atomically through a temporary file and rename.
 
-OMP auto-adds `yield` to declared tool lists and retains `hub`. These are harness behaviors, not role-capability violations.
-
-## Limits
-
-OMP tool allowlists restrict tool names. They do not path-sandbox `write`, `edit`, or `bash`; the manifest's write scopes remain semantic contracts. If stricter isolation is required, run the role in an OMP isolation mode or supply a path-enforcing tool/hook.
+OMP auto-adds its coordination tools to task agents. Model choice, isolation, communication, artifacts, and result notification remain native harness concerns; the skill does not recreate them.
