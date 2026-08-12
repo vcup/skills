@@ -22,7 +22,7 @@
 
 ## Authoritative state
 
-- **Current candidate/revision:** package deliverable committed at `ffe3f72` (`Package portable ensemble skill and OMP adapter`); this `STATE.md` is pending its separate submission.
+- **Current candidate/revision:** package deliverable committed at `ffe3f72` (`Package portable ensemble skill and OMP adapter`); this `STATE.md` in the current repository revision is the coordination-state authority.
 - **Ground-truth pointers:** Agent Skills specification; OMP task-agent discovery docs; `npx skills` README; `ffe3f72`; direct `npx skills` and OMP smoke observations.
 - **Known stale material:** prior implementation in `~/.agents`, which is source material only and not this repository's deliverable.
 
@@ -60,7 +60,7 @@
 ## Current control state
 
 - **Patterns currently composed:** Frame → Trace authority/state → implement under clear ownership → validate intended state → submit durable state.
-- **What changed most recently:** committed package at `ffe3f72`; `npx skills` payload and OMP role discovery both revalidated. GPG signing timed out, so the repository's unavailable signer was bypassed for this commit; no repository policy required signing.
+- **What changed most recently:** committed package at `ffe3f72` and coordination state separately; `npx skills` payload and OMP role discovery both revalidated. GPG signing timed out, so the repository's unavailable signer was bypassed for the package commit; no repository policy required signing.
 - **Affected results to recheck:** none.
-- **Next action:** commit this state separately, then deliver.
+- **Next action:** delivered.
 - **Blockers:** none.
