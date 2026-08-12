@@ -1,0 +1,9 @@
+{
+  "name": "ensemble-agent-package",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Portable ensemble methodology with an OMP adapter.",
+  "omp": {
+    "extensions": ["./adapters/omp/index.ts"]
+  }
+}
