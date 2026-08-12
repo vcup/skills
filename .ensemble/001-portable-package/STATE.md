@@ -1,66 +1,36 @@
-# Ensemble: package portable core and OMP adapter
+# Ensemble: native harness package
 
-- **Invocation directory:** `.ensemble/001-portable-package/`
-- **Lifecycle:** active
-- **Created:** 2026-08-06
+- **Lifecycle:** completed
+- **Requested deliverable:** Make ensemble practical by using native harness capabilities, with OMP installed online rather than through a manual clone.
+- **Subject and boundary:** portable ensemble method plus OMP plugin package; OMP is the implemented adapter, while other harnesses receive the skill through `npx skills`.
+- **Required coverage:** online OMP install; native agents; path-safe state tool; removal of workaround-driven process; portable skill discovery; runtime and boundary verification.
+- **Completion evidence:** OMP resolves `github:vcup/skills`; the extension loads three agents and writes only valid invocation state; tests and typecheck pass; `npx skills` still discovers the portable core.
 
-## Outcome
+## Contributions
 
-- **Requested deliverable:** Independent `ensemble` repository installable with `npx skills`, with a portable role contract and a runnable OMP adapter.
-- **Subject:** copied ensemble methodology plus package, role, and adapter files.
-- **Relevant boundary:** `npx skills` installs the portable `skills/ensemble/` core only; OMP extension loading is separate runtime-adapter installation.
-- **Constituent coverage:** portable core; role/degradation contract shipped with the skill; OMP agent discovery and tool allowlists; installation boundaries; observed validation.
-- **Completion evidence:** `npx skills add . --list` finds `ensemble`; OMP loaded with this repository discovers the five `ensemble-*` agents.
-
-## Runtime configuration
-
-- **Harness capabilities:** `npx skills`  lists/install skills; OMP supports extension-package sibling `skills/` and `agents/` discovery.
-- **Role → model mapping:** adapter leaves model selection to runtime configuration.
-- **Configuration owner:** user / harness
-- **Configuration scope:** invocation
-- **Configuration lifetime:** invocation
-
-## Authoritative state
-
-- **Current candidate/revision:** package deliverable committed at `ffe3f72` (`Package portable ensemble skill and OMP adapter`); this `STATE.md` in the current repository revision is the coordination-state authority.
-- **Ground-truth pointers:** Agent Skills specification; OMP task-agent discovery docs; `npx skills` README; `ffe3f72`; direct `npx skills` and OMP smoke observations.
-- **Known stale material:** prior implementation in `~/.agents`, which is source material only and not this repository's deliverable.
-
-## Current composition
-
-| Member / attempt | Model | Role | Assigned coverage | Expected contribution | Difference or named redundancy miss | Status | Recovery pointer |
-|---|---|---|---|---|---|---|---|
-| coordinator | n/a | integrator | all | portable package + OMP adapter | direct implementation | returned | repository files |
-
-- **Write ownership and baseline:** single writer in empty repository.
-- **Missing-member disposition:** no independent members used; no harness decision was delegated.
-
-## Accepted results
-
-- Portable core copied under `skills/ensemble/`; its role contract is colocated as `ROLE-CONTRACT.yaml` so `npx skills` carries it.
-- OMP extension package discovers five `ensemble-*` agents with tool allowlists and `autoloadSkills: [ensemble]`.
-- Contract distinguishes semantic role capabilities from enforcement and requires recorded degradation.
-
-## Open control issues
-
-| Finding, disagreement, or unavailable check | Effect on deliverable / dependency | Disposition | Next owner/action | Pointer |
+| Attempt | Assigned coverage | Material difference or redundancy | Status | Result / evidence pointer |
 |---|---|---|---|---|
-| `npx skills` installs skills, not extension modules or agents | OMP adapter cannot be installed by skill CLI | accepted / documented | user loads OMP adapter through native extension mechanism | README.md |
-| OMP tool allowlists do not path-sandbox writes | state-writer path scope is not enforced | accepted / documented | record as adapter limit | adapters/omp/README.md |
-| Claude, Codex, Copilot adapters absent | no auto role discovery/tool enforcement there | accepted / explicit fallback | use role assignments and record capability loss | adapters/README.md; ROLE-CONTRACT.yaml |
+| upstream research | OMP installation and plugin discovery | official docs and current CLI behavior | returned | `omp install github:vcup/skills --dry-run --json` |
+| architecture audit | workaround-driven skill design | method vs harness-adapter boundary | returned | current skill/package revision |
+| runtime smoke | native OMP capabilities | real extension session in a temporary project | returned | three agents discovered; `ensemble_state` wrote `STATE.md` |
+| boundary tests | state path safety | invalid path and symlink escapes | returned | `adapters/omp/index.test.ts` |
 
-## Verification summary
+## Decisions and findings
 
-| Observed boundary | Applies to state | Result | Unavailable consequence | Pointer |
-|---|---|---|---|---|
-| `npx --yes skills add . --list` | repository root | pass: found one skill, `ensemble` | — | command output |
-| `npx skills add … --copy` into a temporary Codex project | installed portable payload | pass: installed `SKILL.md` and `ROLE-CONTRACT.yaml` | adapter files intentionally excluded | command output |
-| OMP `--extension /home/vcup/codes/ensemble` smoke | adapter | pass: discovered five `ensemble-*` agents | — | process log |
-| `package.json` parses | package | pass | — | node JSON parse |
-## Current control state
+- OMP uses `omp install github:vcup/skills`; manual clone, local `--extension`, and separate `npx skills` install are not the OMP path.
+- Portable skill keeps the method; adapters exploit native agents, models, isolation, notifications, artifacts, and tools.
+- Removed mechanical state-writer, integrator role, role contract, scoped briefs, mandatory member summaries, coordinator intervention policing, role-model questions, and unavailable-member state machine.
+- Coordinator owns the outcome and may work directly; agents provide independent result-changing contributions rather than enforcing an organizational boundary.
+- `ensemble_state` enforces `.ensemble/<NNN>-<slug>/STATE.md`, rejects symlink escapes, and writes atomically.
 
-- **Patterns currently composed:** Frame → Trace authority/state → implement under clear ownership → validate intended state → submit durable state.
-- **What changed most recently:** committed package at `ffe3f72` and coordination state separately; `npx skills` payload and OMP role discovery both revalidated. GPG signing timed out, so the repository's unavailable signer was bypassed for the package commit; no repository policy required signing.
-- **Affected results to recheck:** none.
-- **Next action:** delivered.
+## Candidate and verification
+
+- **Candidate:** code committed at `95ebb1d` (`Redesign ensemble around native harness capabilities`).
+- **Observed checks:** `bun test` passed 4 boundary tests; `bun run typecheck` passed; `npx skills add . --list` found `ensemble`; `omp install github:vcup/skills --dry-run --json` resolved the online source; OMP runtime smoke discovered `ensemble-scout`, `ensemble-reviewer`, and `ensemble-worker`, and `ensemble_state` wrote the requested state file.
+- **Unavailable critical checks:** actual online installation of this revision requires pushing `95ebb1d`; source resolution and local plugin runtime were both observed.
+- **Unresolved choices or risks:** none blocking.
+
+## Next
+
+- **Next action:** delivered; push the committed revision to make the online installer serve it.
 - **Blockers:** none.
