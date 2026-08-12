@@ -26,11 +26,11 @@
 ## Candidate and verification
 
 - **Candidate:** code committed at `95ebb1d` (`Redesign ensemble around native harness capabilities`).
-- **Observed checks:** `bun test` passed 4 boundary tests; `bun run typecheck` passed; `npx skills add . --list` found `ensemble`; `omp install github:vcup/skills --dry-run --json` resolved the online source; OMP runtime smoke discovered `ensemble-scout`, `ensemble-reviewer`, and `ensemble-worker`, and `ensemble_state` wrote the requested state file.
-- **Unavailable critical checks:** actual online installation of this revision requires pushing `95ebb1d`; source resolution and local plugin runtime were both observed.
+- **Observed checks:** `bun test` passed 4 boundary tests; `bun run typecheck` passed; `npx skills add . --list` found `ensemble`; `omp install github:vcup/skills --json` installed and enabled `@vcup/ensemble@0.2.0`; the installed package contains the simplified skill, three agents, and path-safe adapter; local OMP runtime smoke invoked `ensemble_state` and discovered all three agents.
+- **Unavailable critical checks:** none.
 - **Unresolved choices or risks:** none blocking.
 
 ## Next
 
-- **Next action:** delivered; push the committed revision to make the online installer serve it.
+- **Next action:** delivered.
 - **Blockers:** none.
