@@ -1,71 +1,52 @@
 # Ensemble
 
-Portable ensemble methodology, installed as a skill with `npx skills`, plus an optional Oh My Pi adapter.
+Ensemble methodology packaged with native harness capabilities.
 
-## Install the skill
+## Install
 
-Always install the portable skill with `npx skills`:
+### Oh My Pi
 
-```bash
-npx skills add <owner>/ensemble --skill ensemble -a <agent>
-```
-
-Use `--list` to inspect a source and `--copy` only where symlinks are unsuitable. Examples:
+Install the plugin directly from GitHub:
 
 ```bash
-# Codex
-npx skills add <owner>/ensemble --skill ensemble -a codex -y
-
-# Claude Code
-npx skills add <owner>/ensemble --skill ensemble -a claude-code -y
-
-# GitHub Copilot
-npx skills add <owner>/ensemble --skill ensemble -a github-copilot -y
+omp install github:vcup/skills
 ```
 
-The repository exposes the portable core at `skills/ensemble/`, which `npx skills` discovers. This is the recommended and only documented skill-installation path.
+This single online installation provides the `ensemble` skill, native `ensemble-*` task agents, and the path-safe `ensemble_state` tool. Do not clone the repository, pass a local `--extension` path, or separately install the skill with `npx skills` on OMP.
 
-## Oh My Pi adapter
+Update or remove it through OMP's plugin manager.
 
-`npx skills` installs `SKILL.md` directories only. It does not install OMP extension modules or OMP `agents/` definitions, and OMP is not a `npx skills --agent` target. The adapter therefore needs OMP's native extension mechanism:
+### Other harnesses
 
-```text
-omp --extension /absolute/path/to/ensemble
+Install the portable skill with `npx skills` when the harness does not consume this plugin package:
+
+```bash
+npx skills add vcup/skills --skill ensemble -a <agent>
 ```
 
-Loading the package makes OMP discover its sibling `skills/` and `agents/` directories. The `ensemble-*` agent types then become available to `task`; each autoloads the `ensemble` skill.
-
-Do not present the adapter command as a skill installer. It loads runtime adapter capabilities after `npx skills` has installed the portable skill where needed.
+`npx skills` installs the method under `skills/ensemble/`; it does not install OMP runtime agents or tools.
 
 ## Package surface
 
-- `skills/ensemble/`: portable Agent Skills methodology.
-- `skills/ensemble/ROLE-CONTRACT.yaml`: authoritative semantic role, durability, and degradation contract; installed with the skill.
-- `agents/`: OMP mappings from semantic roles to OMP agent definitions and tool allowlists.
-- `adapters/`: harness-specific installation and enforcement notes.
+- `skills/ensemble/`: portable method and optional pattern references.
+- `agents/`: OMP-native independent scout, reviewer, and worker roles.
+- `adapters/omp/index.ts`: registers the path-safe `ensemble_state` tool.
 
-## Role contract
+## Design
 
-| Role | Owns | Semantic capabilities |
-|---|---|---|
-| `scout` | independent facts and boundaries | read, search, web research |
-| `reviewer` | independent claim checks | read, search, inspect |
-| `worker` | one assigned contribution | read, modify, validate |
-| `state-writer` | mechanical invocation persistence | read, persist state |
-| `integrator` | accepted work and candidate validation | read, modify, validate, version control |
+The portable skill states the method: cover the full outcome, produce independent materially different or intentionally redundant contributions, decide by observation rather than votes, evolve one deliverable, and verify the accepted candidate.
 
-The manifest, not a role name, defines these meanings. An adapter maps them to its own agent schema and tools.
+Harness adapters should use their strongest native capabilities instead of emulating a lowest common denominator. On OMP:
 
-## Portability and degradation
+- plugin installation supplies the skill and agents together;
+- native task roles and tool allowlists provide contribution shapes;
+- the harness selects models and reports available agents;
+- task notifications eliminate polling;
+- task outputs and artifacts are evidence pointers;
+- `ensemble_state` atomically writes only `.ensemble/<NNN>-<slug>/STATE.md`.
 
-The Agent Skills specification does not standardize subagent definitions, agent discovery, tool allowlists, write scopes, or permission enforcement. A harness without a matching adapter must:
-
-1. use the core skill's assignment-based workflow;
-2. record unavailable role/tool enforcement in `STATE.md` as a capability loss;
-3. never claim a semantic capability is enforced merely because a prompt requests it.
-
-The OMP adapter enforces its declared tool allowlists. OMP does not path-sandbox writes, so the `state-writer` invocation-directory restriction remains a role-contract obligation, not a runtime guarantee.
+The coordinator remains responsible for the outcome and may investigate, implement, integrate, or validate directly. Delegation exists to create useful independence and parallelism, not to forbid coordinator work.
 
 ## Version control
 
-Version coordination state through repository VCS when available; otherwise use harness durability and record the loss. Submit code history under repository conventions. Keep the two submissions separate.
+Version coordination state through repository VCS when available. Submit code under repository conventions. Keep state and code submissions separate.

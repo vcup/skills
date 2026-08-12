@@ -279,23 +279,23 @@ For research, documentation, or decisions without executable artifacts, use mate
 
 ## Recover from a checkpoint
 
-- **Intent:** Resume fresh coordination from ground truth without conversation memory.
-- **Shape:** create invocation state → update at the canonical boundary → interruption → inspect the current subject and refresh stale observations → resume the next useful pattern.
-- **Signals:** universal; add detail only when composition, findings, decisions, or checks require it.
-- **Scale:** one `.ensemble/<NNN>-<invocation-slug>/STATE.md`; optional brief only when a subagent needs more context; all dependencies must survive recovery.
+- **Intent:** Resume from ground truth without conversation memory.
+- **Shape:** read invocation state → inspect current candidate and evidence → refresh stale observations → resume the next useful pattern.
+- **Signals:** interruption, handoff, or resumed session.
+- **Scale:** one compact `.ensemble/<NNN>-<invocation-slug>/STATE.md` plus source and artifact pointers.
 - **Combinations:** all patterns, especially `Trace authority and state`, `Preserve and disposition findings`, and `Check three-way readiness`.
-- **Output:** compact coordinator state with durable pointers sufficient for full recovery from source, optional briefs, and artifacts.
-- **Failures:** conversation as technical memory; mandatory work-item tree; workflow DB; copied reports; append-only event log; stale state outranking source; temporary dependency presented as recoverable; invocation configuration leaked into distributed skill facts.
+- **Output:** current outcome, coverage, contributions, decisions, candidate, verification, and next action.
+- **Failures:** conversation as technical memory; work ledger; copied reports; append-only event log; stale state outranking source.
 
 ## Submit a durable state
 
-- **Intent:** Bind modifying work, observations, and handoff to identifiable durable states: coordination state recoverable and versioned when repository VCS is available, and the code deliverable submitted under repository conventions. Keep them separate so neither history pollutes the other.
-- **Shape:** identify the change and scope → identify snapshot → validate it → submit state through repository VCS, or harness durability when VCS is unavailable → submit code through repository conventions → record delivered state, observations, and any durability capability loss.
-- **Signals:** repository modification; handoff between agents; audit/fix-up history; recovery boundary needed; state that must survive a fresh session.
-- **Scale:** staged snapshot, patch, commit, branch, or worktree according to policy for subject changes; for read-only subject work, no code snapshot is needed, but coordination state still follows the update boundary.
+- **Intent:** Keep coordination state recoverable and submit the code deliverable under repository conventions without interleaving their history.
+- **Shape:** validate candidate → version coordination state → submit code → record delivered candidate and observations.
+- **Signals:** repository modification, handoff, interruption, or delivery.
+- **Scale:** use repository conventions; read-only subject work needs no code submission.
 - **Combinations:** `Implement under clear ownership`, `Validate the intended state`, `Recover from a checkpoint`, `Deliver and synthesize`.
-- **Output:** identifiable durable changes and linked observations.
-- **Failures:** commit treated as correctness; universal follow-up-commit policy; coordinator as operator of a specific VCS tool; bypassed checks hidden; state left unrecoverable across sessions; state and code interleaved.
+- **Output:** identifiable state and code submissions tied to observed verification.
+- **Failures:** commit treated as correctness; universal follow-up-commit policy; bypassed checks hidden; state unrecoverable; state and code interleaved.
 
 ## Deliver and synthesize
 
@@ -306,47 +306,6 @@ For research, documentation, or decisions without executable artifacts, use mate
 - **Combinations:** `Check three-way readiness`, `Submit a durable state`, `Preserve durable reasoning`.
 - **Output:** actual requested deliverable, observed verification, and visible remaining issues.
 - **Failures:** final report substitutes for code; mandatory archive; unresolved risk hidden; perfect history prioritized over delivery.
-
-## Bound a direct intervention
-
-- **Intent:** Preserve the delegation boundary when normal delegation cannot serve a necessary action.
-- **Shape:** delegation blocked → record reason, scope, ownership impact, and return-to-delegation condition → intervene → restore delegation at the condition.
-- **Signals:** coordinator repeatedly opens detail beyond dispatch/assessment; coordinator drafts the primary artifact; coordinator becomes sole detailed oracle; delegation loops on the same blocked step.
-- **Scale:** one intervention with explicit recording; never expand to routine coordinator duty.
-- **Combinations:** `Recover from a checkpoint`, `Preflight and reassess ownership`, `Probe a shared assumption`.
-- **Output:** recorded intervention with return condition; delegation boundary restored.
-- **Failures:** silent intervention; recording without return condition; expanding into pattern of coordinator fieldwork.
-## Pattern provenance
-
-Provenance stays outside the runtime cards but remains mapped one-to-one:
-
-- **Frame the consequential question:** terminology misses, ambiguity guards, rejection of detailed obligation schemas, and scope silently shrunk to a convenient subset.
-- **Resolve an alternate interpretation:** ambiguity-driven scope changes, including the source-comment versus Rust-annotation miss.
-- **Map the surface:** broad audits and annotation misses showed that changed files are not the whole surface.
-- **Trace authority and state:** stale evidence, role → model scope collapse, provenance, and subject/candidate/snapshot distinctions.
-- **Fan out independent contributions:** heterogeneous design and audit work; first-pass independence and semantic heterogeneity.
-- **Add redundancy:** stochastic misses justified repetition; fixed populations did not.
-- **Compete alternatives:** conditional evolutionary search survived; universal design generations did not.
-- **Run a tracer experiment:** prototypes can answer load-bearing questions without becoming production architecture.
-- **Implement under clear ownership:** initially separate tracks later overlapped, preserving conditional ownership and isolation.
-- **Preflight and reassess ownership:** observed coupling changed parallel work into shared work; serial/parallel policy stayed conditional.
-- **Build an independent oracle:** 178 green tests coexisted with production defects, exposing self-confirmation.
-- **Audit through risk lenses:** broad audit surfaces and hot-reload defects supported risk-driven, not fixed, lenses.
-- **Walk a risky boundary:** deadlock, lifecycle order, rollback, visibility, and ABI/FFI failures escaped local checks.
-- **Reconcile by observation:** conflicting interpretations of empirical evidence required distinguishing checks, not voting.
-- **Cross-critique concrete claims:** high-risk claims benefit from a bounded second pass, not a universal review round.
-- **Repair and re-examine:** hot-reload repair showed the value of scoped, impact-aware fix-up.
-- **Preserve and disposition findings:** finding meaning and work disposition are separate decisions.
-- **Join across boundaries:** ABI/FFI and separate tracks required conditional integration ownership.
-- **Validate the intended state:** green tests did not establish delivery; sufficiency remains domain-relative.
-- **Preserve durable reasoning:** non-obvious technical memory belongs in its maintained owner.
-- **Check three-way readiness:** design support, implementation health, and delivery readiness must remain distinct.
-- **Probe a shared assumption:** bounded novelty helps when lenses collapse; automatic disruptors do not.
-- **Ask the decision owner:** residual-risk authority is contextual and user-owned choices remain with the user.
-- **Recover from a checkpoint:** coordinator context loss and configuration-scope errors require durable, source-led recovery.
-- **Submit a durable state:** Git mechanics are adapters; an identifiable state is not proof of correctness; coordination state left uncommitted was unrecoverable across sessions.
-- **Deliver and synthesize:** delivery must be the requested artifact, not a mandatory archive or report.
-- **Bound a direct intervention:** coordinator intervention is a recorded exception with a return condition, never routine fieldwork.
 
 # Composition examples
 
@@ -403,14 +362,3 @@ Classify what changed and redirect minimally:
 - attempts repeat one assumption → one `Probe a shared assumption`;
 - evidence cannot decide a user-owned trade-off → `Ask the decision owner`.
 
-# Historical heuristics retained narrowly
-
-- Periodically confront design claims with implementation or tracer observations; do not alternate generations mechanically.
-- A small population can provide variation and redundancy; size by consequence and information gain, not fixed counts.
-- Lack of substantive change can bound exploration only after implementation health and delivery readiness are checked; never use a stall counter alone.
-- Predictable artifact grouping and final synthesis may help genuinely long work; do not require per-round indexes.
-- Add a status file, scoped briefs, ledger, dependency tree, independent evaluator, or named integration owner only when an observed coordination failure justifies that mechanism.
-
-# Rejected complexity
-
-Do not make patterns into a universal stage sequence. Do not require a workflow database, recursive work tree, obligation/claim ledger, versioned invalidation engine, event log, packet layer, mandatory archivist/evaluator, per-action artifact, fixed population, global stall counter, automatic disruptor, or mandatory synthesis/archive. Any may return in narrower form only when a concrete task independently justifies its cost.
