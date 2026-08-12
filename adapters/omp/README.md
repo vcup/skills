@@ -12,7 +12,7 @@ OMP enables the plugin from its lockfile and discovers the package's `skills/` a
 
 | Capability | Implementation |
 |---|---|
-| Portable method | `skills/ensemble/` |
+| Portable methods | `skills/ensemble/`, `skills/lossless/`, `skills/edit-commit-msg/` |
 | Independent research | `ensemble-scout` |
 | Independent assessment | `ensemble-reviewer` |
 | Owned production | `ensemble-worker` |
