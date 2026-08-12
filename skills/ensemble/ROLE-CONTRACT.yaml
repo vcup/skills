@@ -1,0 +1,43 @@
+schema: ensemble-package/v1
+core_skill: .
+roles:
+  scout:
+    purpose: Independently map facts and boundaries.
+    capabilities: [read, search, web-research]
+    writes: none
+  reviewer:
+    purpose: Independently test claims against ground truth.
+    capabilities: [read, search, inspect]
+    writes: none
+  worker:
+    purpose: Produce one assigned artifact under explicit ownership.
+    capabilities: [read, search, modify, validate]
+    writes: assigned-deliverable
+  state-writer:
+    purpose: Persist returned invocation content when its producer cannot write it.
+    capabilities: [read, persist-state]
+    writes: invocation-state
+    constraints:
+      - Copy supplied content verbatim.
+      - Do not analyze, revise, or synthesize content.
+      - Do not modify the deliverable.
+  integrator:
+    purpose: Apply accepted work, validate the candidate, and submit it under repository conventions.
+    capabilities: [read, search, modify, validate, version-control]
+    writes: accepted-deliverable
+requirements:
+  state_recovery:
+    preferred: repository-version-control
+    fallback: harness-durability
+    fallback_recording: required
+  submission_separation:
+    state_and_code: required
+fallback:
+  when_role_discovery_or_enforcement_is_unavailable:
+    - Use role names as task assignments, not as enforced identities.
+    - Record unavailable enforcement and its consequence in STATE.md.
+    - Do not claim tool or write-scope isolation.
+limits:
+  - Role capabilities are semantic contracts.
+  - An adapter may only enforce capabilities it can map to its own permissions.
+  - A tool allowlist does not imply path-scoped write confinement unless the harness provides it.
