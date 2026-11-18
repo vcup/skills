@@ -1,8 +1,15 @@
 # Ensemble Invocation State
 
-Create the next `.ensemble/<NNN>-<invocation-slug>/STATE.md`, using the largest prefix plus one from `001`. Never overwrite an invocation. Use the harness `ensemble_state` tool when available.
+In managed plugin mode, submit domain actions through the adapter tools; the program generates this checkpoint outside the workspace. Do not allocate paths, edit generated Markdown, or maintain `.ensemble/` manually.
 
-`STATE.md` is a compact recovery surface, not a work ledger or technical dossier. Replace stale facts; keep history in source control and linked artifacts.
+For manual records, choose one supported location before dispatch:
+
+- **Current OMP writer:** use `.ensemble/<NNN>-<invocation-slug>/STATE.md` relative to the session working directory. Keep `.ensemble/` in its own repository and exclude it locally from the product repository when it is not already tracked. The writer rejects symlink roots and invocation directories; it cannot redirect to an external archive. The Lead allocates the next three-digit prefix from `001` through `999`, with one state writer at a time. At exhaustion, choose a new authorized records location; do not overwrite an invocation or pass `1000` to this writer.
+- **External records repository:** use ordinary authorized file tools for a checkpoint and its supporting materials. Allocate identities within that repository, keep explicit subject/baseline references, and report its actual location. Do not call the OMP writer for these paths.
+
+Both manual options require explicit history management. `ensemble_state` replaces the complete checkpoint atomically; it does not allocate identities, validate its meaning, coordinate concurrent writers, or commit history. Existing tracked records require a separate migration decision rather than an automatic move.
+
+`STATE.md` is a compact recovery view, not a work ledger or technical dossier. Keep technical truth in the subject and evidence; keep frequent history in a separate repository rather than the product commit stream.
 
 ```markdown
 # Ensemble: <short outcome>
@@ -36,4 +43,4 @@ Create the next `.ensemble/<NNN>-<invocation-slug>/STATE.md`, using the largest 
 - **Blockers:** <none or explicit blocker>
 ```
 
-Update before dispatch when the frame or composition changes; after evidence changes a decision, candidate, or check; and before interruption or delivery. Make each update recoverable through repository VCS when available, otherwise through harness durability with the loss recorded.
+Record material changes before dispatch, after evidence changes a decision/candidate/check, and before interruption or delivery. Managed tools maintain this view and its history; skill-only users maintain the isolated records area. Report persistence gaps explicitly. Specific deployment routes and credentials do not belong in the product repository; an inspiring evolution reading is maintained separately using `EVOLUTION-TEMPLATE.md`.

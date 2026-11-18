@@ -10,7 +10,7 @@ Optional workflow verbs—not phases, prerequisites, or legal transitions. Chain
 4. After material change, revise stale contributions and recheck only affected work.
 5. Repeat only for an unresolved finding, distinct lens, stale observation, changed assumption, or owner decision.
 
-Cards state **Intent**, **Shape**, **Signals**, **Scale**, **Combinations**, **Output**, and **Failures**. [Provenance](#pattern-provenance) records why patterns remain.
+Cards state **Intent**, **Shape**, **Signals**, **Scale**, **Combinations**, **Output**, and **Failures**. Preserve evidence for retaining or adapting a pattern in an [evolution reading](EVOLUTION-TEMPLATE.md).
 
 ## Find a pattern
 
@@ -27,7 +27,7 @@ Cards state **Intent**, **Shape**, **Signals**, **Scale**, **Combinations**, **O
 
 ## Starting-composition examples
 
-These sketches are neither exhaustive nor normative. Start composition with [`SKILL.md`](SKILL.md) Steps 1–3; let cards and observations govern later action. Member count and role/model choices remain contextual.
+These sketches are neither exhaustive nor normative. Start composition with [`SKILL.md`](SKILL.md) Steps 1–3; let cards and observations govern later action. Member count and role/model choices remain contextual. Choose fresh, forked, or continued native agents with the [driving guide](README.md#choose-how-to-drive-native-agents); each pattern can use any suitable choice, subject to actual tools, authority, and information exposure.
 
 | Situation | Possible composition |
 |---|---|
@@ -282,20 +282,42 @@ For research, documentation, or decisions without executable artifacts, use mate
 - **Intent:** Resume from ground truth without conversation memory.
 - **Shape:** read invocation state → inspect current candidate and evidence → refresh stale observations → resume the next useful pattern.
 - **Signals:** interruption, handoff, or resumed session.
-- **Scale:** one compact `.ensemble/<NNN>-<invocation-slug>/STATE.md` plus source and artifact pointers.
+- **Scale:** one current invocation checkpoint returned by managed tools, plus relevant source and artifact pointers; skill-only mode uses its isolated state document.
 - **Combinations:** all patterns, especially `Trace authority and state`, `Preserve and disposition findings`, and `Check three-way readiness`.
 - **Output:** current outcome, coverage, contributions, decisions, candidate, verification, and next action.
 - **Failures:** conversation as technical memory; work ledger; copied reports; append-only event log; stale state outranking source.
 
 ## Submit a durable state
 
-- **Intent:** Keep coordination state recoverable and submit the code deliverable under repository conventions without interleaving their history.
-- **Shape:** validate candidate → version coordination state → submit code → record delivered candidate and observations.
-- **Signals:** repository modification, handoff, interruption, or delivery.
-- **Scale:** use repository conventions; read-only subject work needs no code submission.
+- **Intent:** Keep coordination recoverable without adding frequent records or environment configuration to product history.
+- **Shape:** validate candidate → save domain actions through managed tools, or update the manual checkpoint → confirm the receipt or saved content/history → deliver product under its own conventions.
+- **Signals:** material decision, changed candidate, handoff, interruption, or delivery.
+- **Scale:** managed mode uses an out-of-workspace archive; skill-only mode uses an isolated records area and reports missing durability. Read-only subject work needs no code submission.
 - **Combinations:** `Implement under clear ownership`, `Validate the intended state`, `Recover from a checkpoint`, `Deliver and synthesize`.
-- **Output:** identifiable state and code submissions tied to observed verification.
-- **Failures:** commit treated as correctness; universal follow-up-commit policy; bypassed checks hidden; state unrecoverable; state and code interleaved.
+- **Output:** identifiable candidate, observed verification, and separately confirmed archive persistence.
+- **Failures:** commit treated as correctness; manual editing of generated documents; source/record histories merely separated into commits in one repo; save failure hidden.
+
+## Teach a transferable method
+
+- **Intent:** Improve a working member's process through a concrete correction and observable application.
+- **Shape:** early artifact → diagnose failing step → bounded instruction/example → repair → unseen neighboring case and non-applicable counterexample → assess.
+- **Signals:** repeated miss, weak evidence, overbroad rule, unclear task packet, or a member unable to progress.
+- **Scale:** one relevant intervention; preserve an independent assessment path when shared coaching might anchor everyone.
+- **Combinations:** `Reconcile by observation`, `Validate the intended state`, `Preserve and disposition findings`.
+- **Output:** corrected contribution and scoped evidence for or against the proposed learning.
+- **Failures:** acknowledgment counted as learning; model change blamed/credited without evidence; guided revision counted as a new independent attempt; Lead silently does all repairs.
+
+## Publish an evolution reading
+
+- **Intent:** Leave an evidence-linked explanation that later readers can study and use to improve their work.
+- **Shape:** material change in judgment → causal reflection with sources → non-author review → publish by domain → test a scoped lesson in later work.
+- **Signals:** a counterexample changes a rule, independent authority contradicts local tests, a teaching method succeeds or fails, or a mistaken guarantee is narrowed.
+- **Scale:** meaningful turns only; a short overview plus focused domain readings when needed. Use ordered entries without narrative timestamps or work durations.
+- **Combinations:** `Teach a transferable method`, `Preserve durable reasoning`, `Recover from a checkpoint`.
+- **Output:** reviewed explanation, limits, next test, and stable links; optionally a separately assessed reusable lesson.
+- **Failures:** every tool call becomes a story; sequence mistaken for causality; failures rewritten as foresight; draft publication blocks an otherwise complete deliverable; full archive broadcast as prompt.
+
+Managed tools own numbering, files, references, revision and publication. Models supply claims, research content and evidence rather than maintaining generated documents. Skill-only use follows [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md) in its isolated records area.
 
 ## Deliver and synthesize
 
