@@ -1,9 +1,13 @@
 ---
-name: lossless
-description: Make prose clearer and shorter without losing meaning. Use for rewriting, drafting concise responses, reducing token use, or auditing language whose logic and facts must remain intact.
+name: always
+description: Use on every task, from the first plan through the final response. Apply lossless compression and logic checks to reasoning, instructions, and written output, preserving meaning, facts, constraints, and uncertainty. Use alongside any task-specific skills.
+metadata:
+  keywords: "lossless, clarity, compression, semantic-preservation, logic-audit"
 ---
 
-# Lossless
+# Always
+
+Apply this skill throughout planning, execution, and communication on every task. Scale the audit to the work: a short response needs a brief check; complex work needs the full process.
 
 Say in fifty words what needs no hundred. Treat that ratio as pressure to think, never as a quota: the goal is the shortest clear form that preserves the work.
 
@@ -11,7 +15,7 @@ Compression is an audit, not cosmetic cleanup. Making every word justify itself 
 
 ## 1. Recover the full meaning
 
-Before rewriting, identify:
+Before drafting or rewriting, identify:
 
 - purpose, audience, and required action;
 - claims, facts, evidence, and uncertainty;
@@ -106,7 +110,7 @@ For editing tasks, return the lossless rewrite. Report logic, factual, or policy
 - **Finding:** problem exposed by the rewrite.
 - **Proposed correction:** intentional semantic change requiring approval or evidence.
 
-If invoked as an ongoing communication mode, remain concise and lossless until the user asks otherwise. If the request names one artifact, apply the method only there.
+Remain concise and lossless by default unless the user asks otherwise. When editing a named artifact, keep edits within the requested scope and apply the same checks to your surrounding communication.
 
 ## Failure modes
 

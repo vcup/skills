@@ -12,7 +12,7 @@ Install the plugin directly from GitHub:
 omp install github:vcup/skills
 ```
 
-This single online installation provides the `ensemble`, `lossless`, and `edit-commit-msg` skills, native `ensemble-*` task agents, and the path-safe `ensemble_state` tool. Do not clone the repository, pass a local `--extension` path, or separately install a skill with `npx skills` on OMP.
+This single online installation provides the `ensemble`, `always`, and `edit-commit-msg` skills, native `ensemble-*` task agents, and the path-safe `ensemble_state` tool. Do not clone the repository, pass a local `--extension` path, or separately install a skill with `npx skills` on OMP.
 
 Update or remove it through OMP's plugin manager.
 
@@ -22,7 +22,7 @@ Install a portable skill with `npx skills` when the harness does not consume thi
 
 ```bash
 npx skills add vcup/skills --skill ensemble -a <agent>
-npx skills add vcup/skills --skill lossless -a <agent>
+npx skills add vcup/skills --skill always -a <agent>
 npx skills add vcup/skills --skill edit-commit-msg -a <agent>
 ```
 
@@ -31,14 +31,14 @@ npx skills add vcup/skills --skill edit-commit-msg -a <agent>
 ## Package surface
 
 - `skills/ensemble/`: portable method and optional pattern references.
-- `skills/lossless/`: portable method for concise, meaning-preserving prose and language audits.
+- `skills/always/`: portable method applied on every task for lossless clarity, compression, and logic audits (formerly `lossless`).
 - `skills/edit-commit-msg/`: safely crafts the pending Git commit message without changing history or workflow state.
 - `agents/`: OMP-native independent scout, reviewer, and worker roles.
 - `adapters/omp/index.ts`: registers the path-safe `ensemble_state` tool.
 
 ## Design
 
-`ensemble` covers full outcomes through independent contributions checked against ground truth. `lossless` compresses language only after recovering its propositions, relations, boundaries, and practical effect. `edit-commit-msg` reconstructs commit intent from read-only evidence and writes only Git's pending message file; it never creates, amends, or advances a commit.
+`ensemble` covers full outcomes through independent contributions checked against ground truth. `always` applies lossless clarity and logic checks throughout every task, compressing language only after recovering its propositions, relations, boundaries, and practical effect. `edit-commit-msg` reconstructs commit intent from read-only evidence and writes only Git's pending message file; it never creates, amends, or advances a commit.
 
 Harness adapters should use their strongest native capabilities instead of emulating a lowest common denominator. On OMP:
 
