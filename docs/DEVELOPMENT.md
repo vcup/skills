@@ -17,9 +17,21 @@ Load it with the container template, then run the checks from the workspace root
 
 ```bash
 bun install --frozen-lockfile
-bun test          # 4 pass
-bun run typecheck # tsc --noEmit, clean
+bun test               # 4 pass
+bun run typecheck      # tsc --noEmit, clean
+python3 scripts/check-docs.py  # 44 documents, 626 references, 0 broken
 ```
+
+`check-docs.py` verifies file, heading, and line references across the design
+documents. It skips external URLs by default. To verify the pinned DSH sources
+as well, point `--upstream` at a checkout of that exact revision:
+
+```bash
+python3 scripts/check-docs.py \
+  --upstream 3f321d32bfe382212a8ed8785c1d47a5a300aa23=.scratch/extra-src/deepseek-harness-0.2.2-rc.4
+```
+
+That resolves 81 pinned-source references and fails on a stale line number.
 
 ## Upstream sources are fetched, not baked in
 
@@ -32,11 +44,14 @@ git clone --depth 1 --filter=blob:none \
   https://github.com/deepseek-ai/deepseek-harness .scratch/extra-src/deepseek-harness
 ```
 
-To reproduce a pinned revision, fetch the full history and check out the commit:
+To reproduce the pinned revision rather than the current tip:
 
 ```bash
-git -C .scratch/extra-src/deepseek-harness fetch --depth 1 origin <sha>
-git -C .scratch/extra-src/deepseek-harness checkout <sha>
+git init .scratch/extra-src/deepseek-harness
+cd .scratch/extra-src/deepseek-harness
+git remote add origin https://github.com/deepseek-ai/deepseek-harness
+git fetch --depth 1 origin 3f321d32bfe382212a8ed8785c1d47a5a300aa23
+git checkout FETCH_HEAD
 ```
 
 The roadmap pins DSH `0.2.2-rc.4` at `3f321d32bfe382212a8ed8785c1d47a5a300aa23`.
