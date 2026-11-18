@@ -1,0 +1,14 @@
+version: 1
+kind: dsh-podman/container-template
+spec:
+  imageTemplate:
+    base: archlinux
+    packages:
+      - bun
+      - nodejs
+      - npm
+      - pnpm
+  mounts:
+    - kind: project
+      project: vcup-skills
+      mode: read_write
