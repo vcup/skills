@@ -18,23 +18,36 @@ Update or remove it through OMP's plugin manager.
 
 ### Other harnesses
 
-Install a portable skill with `npx skills` when the harness does not consume this plugin package:
+Discover and select portable skills from this repository:
 
 ```bash
-npx skills add vcup/skills --skill ensemble -a <agent>
-npx skills add vcup/skills --skill always -a <agent>
-npx skills add vcup/skills --skill edit-commit-msg -a <agent>
+npx skills@latest add vcup/skills
 ```
+
+To select a specific skill:
+
+```bash
+npx skills@latest add vcup/skills --skill ensemble
+npx skills@latest add vcup/skills --skill always
+npx skills@latest add vcup/skills --skill edit-commit-msg
+```
+
+Add `-a <agent>` to select the target harness.
 
 `npx skills` installs the selected method under `skills/`; it does not install OMP runtime agents or tools.
 
+## Use
+
+On OMP, invoke `/skill:ensemble <deliverable, constraints, and completion checks>`. See the [OMP guide](adapters/omp/README.md) for role loading and checkpoint storage. Other harnesses use their native skill invocation and the [portable method](skills/ensemble/SKILL.md).
+
 ## Package surface
 
-- `skills/ensemble/`: portable method and optional pattern references.
-- `skills/always/`: portable method applied on every task for lossless clarity, compression, and logic audits (formerly `lossless`).
-- `skills/edit-commit-msg/`: safely crafts the pending Git commit message without changing history or workflow state.
-- `agents/`: OMP-native independent scout, reviewer, and worker roles.
-- `adapters/omp/index.ts`: registers the path-safe `ensemble_state` tool.
+- [Ensemble](skills/ensemble/SKILL.md): portable method, [practice guide](skills/ensemble/README.md), and [patterns](skills/ensemble/PATTERNS.md).
+- [Always](skills/always/SKILL.md): lossless clarity, compression, and logic audits (formerly `lossless`).
+- [Edit commit message](skills/edit-commit-msg/SKILL.md): crafts Git's pending message without changing history or workflow state.
+- [Scout](agents/ensemble-scout.md), [reviewer](agents/ensemble-reviewer.md), and [worker](agents/ensemble-worker.md): OMP-native assignment roles.
+- [OMP adapter](adapters/omp/index.ts): the path-safe `ensemble_state` tool.
+- [DSH design](docs/ensemble/README.md): the planned managed adapter and its [delivery roadmap](ROADMAP.md).
 
 ## Design
 
@@ -51,6 +64,8 @@ Harness adapters should use their strongest native capabilities instead of emula
 
 The coordinator remains responsible for the outcome and may investigate, implement, integrate, or validate directly. Delegation exists to create useful independence and parallelism, not to forbid coordinator work.
 
+Maintainer design: [separate ensemble distributions](docs/ensemble/DISTRIBUTION.md) keeps `vcup/skills` as the pure-skill Git installation source. Its complete generated skill directory and local references will be committed here; OMP and DSH will use independent packages. This repository overview serves source maintainers; installed skills and packages receive only their own usage guides.
+
 ## Version control
 
-Version coordination state through repository VCS when available. Submit code under repository conventions. Keep state and code submissions separate.
+Keep product changes under this repository's conventions. Concrete environment configuration and high-frequency coordination/learning history belong in separate private storage, not merely separate commits here. A managed adapter maintains them through tools outside the workspace; current OMP only provides the documented state writer. The [DSH plugin design](docs/ensemble/README.md) specifies the proposed managed workflow. The [roadmap](ROADMAP.md) assesses its current stage and plans design completion, implementation, and acceptance of the full feature set.
