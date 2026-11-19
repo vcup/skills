@@ -365,6 +365,140 @@ describe("Host gates", () => {
   });
 });
 
+describe("loader-check declares ESM in its scratch directory", () => {
+  /**
+   * Regression: `loader-check.ts` uses `import`, and Node decides how to parse a
+   * `.ts` file by walking up to the nearest `package.json`. An install created
+   * with `npm init -y` — the exact command `require-install-dir` prints — writes
+   * `"type": "commonjs"`, so a scratch directory without its own declaration is
+   * parsed as CommonJS and dies with "Cannot use import statement outside a
+   * module". That made `make host-check` fail on a correctly prepared install
+   * while passing on a hand-made one that happened to omit the `type` field.
+   *
+   * The install below is a faithful `npm init -y` root with only the manifest
+   * `validateInstallDir` requires. It has no real `@deepseek-ai/*` packages, so
+   * the Loader cannot succeed; what is asserted is *how* it fails. Parsing the
+   * module at all proves the declaration is in effect.
+   */
+  /**
+   * A faithful `npm init -y` root. `probe: false` omits the repository's probe
+   * package, which is what an install built from the `INSTALL_DIR` guidance
+   * alone looks like; `probe: true` includes it so the Loader path is reached.
+   *
+   * The distinction matters: `loader-check` refuses before running when the
+   * probe is absent, so a fixture without it can only exercise the guard.
+   */
+  async function commonjsInstall(options: { probe?: boolean } = {}): Promise<string> {
+    const install = await mkdtemp(join(tmpdir(), "make-commonjs-install-"));
+    // Byte-for-byte the shape npm 12 writes, including the commonjs type.
+    await writeFile(
+      join(install, "package.json"),
+      `${JSON.stringify({ name: "dsh-rc4", version: "1.0.0", type: "commonjs", private: true })}\n`,
+    );
+    await mkdir(join(install, "node_modules/@deepseek-ai/dsh-skill"), { recursive: true });
+    await writeFile(
+      join(install, "node_modules/@deepseek-ai/dsh-skill/package.json"),
+      `${JSON.stringify({ name: "@deepseek-ai/dsh-skill", version: "0.2.2-rc.4" })}\n`,
+    );
+    if (options.probe === true) {
+      // The guard only requires the directory to exist; resolution still fails
+      // further down because the real Loader packages are not installed here.
+      await mkdir(join(install, "node_modules/dsh-ensemble-probe"), { recursive: true });
+      await writeFile(
+        join(install, "node_modules/dsh-ensemble-probe/package.json"),
+        `${JSON.stringify({ name: "dsh-ensemble-probe", version: "0.1.0" })}\n`,
+      );
+    }
+    return install;
+  }
+
+  test("the recipe writes an ESM declaration into the scratch directory", async () => {
+    const recipe = await readFile(join(fixture, "Makefile"), "utf8");
+    const block = recipe.slice(recipe.indexOf("\nloader-check:"));
+    const lines = block.slice(0, block.indexOf("\n\n"));
+    expect(lines).toContain('printf \'{"type":"module"}\\n\' > "$$scratch/package.json"');
+  });
+
+  test("a commonjs install parses as ESM instead of dying on import syntax", async () => {
+    // The probe must be present, or the guard below refuses before the module is
+    // ever parsed and this test would measure the guard instead of the parse.
+    const install = await commonjsInstall({ probe: true });
+    const before = await readFile(join(install, "package.json"), "utf8");
+    try {
+      const { all } = await make(["loader-check", `INSTALL_DIR=${install}`]);
+      // The regression's signature. Its absence is the point of this test.
+      expect(all).not.toContain("Cannot use import statement outside a module");
+      // Module resolution ran as ESM: this failure can only happen after the
+      // module was parsed. A CommonJS misparse would never get this far.
+      expect(all).toMatch(/ERR_MODULE_NOT_FOUND|Cannot find package '@deepseek-ai\/dsh-app-boot'/);
+      // The user's install manifest is read, never rewritten.
+      expect(await readFile(join(install, "package.json"), "utf8")).toBe(before);
+    } finally {
+      await rm(install, { recursive: true, force: true });
+    }
+  });
+
+  test("a missing probe package gets an actionable message, not a resolution stack", async () => {
+    // The probe package must be installed in INSTALL_DIR; the Loader resolves it
+    // like any other dependency. Without the guard, Node's own
+    // ERR_MODULE_NOT_FOUND stack is all a maintainer sees, which names no fix.
+    const install = await commonjsInstall();
+    try {
+      const { code, all } = await make(["loader-check", `INSTALL_DIR=${install}`]);
+      expect(code).toBe(2);
+      // The remedy, in the order it must be run.
+      expect(all).toContain("make pack-dsh");
+      expect(all).toContain("dsh-ensemble-probe");
+      expect(all).toContain("npm install --ignore-scripts");
+      // The guard names the missing package and refuses before running.
+      expect(all).toContain("no dsh-ensemble-probe installed");
+      // The bare resolution failure must not be what the user reads.
+      expect(all).not.toContain("ERR_MODULE_NOT_FOUND");
+      expect(all).not.toContain("at defaultResolve");
+      // Nor may a missing dependency be misreported as the ESM parse failure.
+      expect(all).not.toContain("Cannot use import statement outside a module");
+      // It says plainly that nothing was changed or proven.
+      expect(all).toContain("Nothing was installed and nothing was verified");
+      // The supplied directory is echoed so the command is copy-pasteable.
+      expect(all).toContain(install);
+    } finally {
+      await rm(install, { recursive: true, force: true });
+    }
+  });
+
+  test("the INSTALL_DIR guidance names the probe install step", async () => {
+    // A first-time reader gets the whole sequence, not just the rc.4 packages.
+    const { code, all } = await make(["loader-check"]);
+    expect(code).toBe(2);
+    expect(all).toContain("0.2.2-rc.4");
+    expect(all).toContain("make pack-dsh");
+    expect(all).toContain("dsh-ensemble-probe");
+  });
+
+  test("the scratch directory is cleaned up even when the Loader fails", async () => {
+    // Needs the probe present so the recipe actually creates a scratch directory.
+    const install = await commonjsInstall({ probe: true });
+    try {
+      await make(["loader-check", `INSTALL_DIR=${install}`]);
+      const left = (await readdir(install)).filter((name) => name.startsWith(".make-loader."));
+      expect(left).toEqual([]);
+    } finally {
+      await rm(install, { recursive: true, force: true });
+    }
+  });
+
+  test("host-check passes against a real isolated rc.4 install", async () => {
+    const installDir = process.env.MAKE_TEST_INSTALL_DIR;
+    if (installDir === undefined || installDir === "") {
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      return;
+    }
+    const { code, all } = await make(["loader-check", `INSTALL_DIR=${installDir}`]);
+    expect(code).toBe(0);
+    expect(all).toContain("OK dsh-ensemble-probe via real Loader");
+  }, 300_000);
+});
+
 describe("gates fail closed; diagnose observes", () => {
   // Contract: a target whose name ends in `-check` is a gate. Exit 0 means every
   // required check really ran and agreed. A missing prerequisite is a failure,

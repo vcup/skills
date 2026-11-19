@@ -59,7 +59,9 @@ make typecheck                # type check, dependency-free modules
 Two checks need an installation that resolves `@deepseek-ai/*`; neither is part
 of the full test or repository typecheck. Pass an already prepared isolated
 rc.4 install through `INSTALL_DIR` (see the development guide for how it is
-prepared):
+prepared). That install must also contain the probe tgz produced by `make
+pack-dsh`, otherwise the real Loader step of `host-check` fails with `Cannot
+find package 'dsh-ensemble-probe'`.
 
 ```bash
 make typecheck-host INSTALL_DIR=<isolated-rc4-install-dir>   # Host entry types

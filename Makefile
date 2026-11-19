@@ -42,6 +42,9 @@ CONFIRM ?=
 
 BUILD_DIR := build
 PACK_DIR := $(BUILD_DIR)/pack
+# Where `make pack-dsh` leaves the probe tarball. The name is a glob because the
+# version lives in `adapters/dsh/meta.ts`; restating it here would drift.
+DSH_PROBE_DIR := $(PACK_DIR)/dsh
 VALID_TARGETS := skill omp dsh
 TASKS := $(BUN) scripts/project-tasks.ts
 
@@ -179,6 +182,10 @@ require-install-dir: require-bun
 		'    dsh_install=$${TMPDIR:-/tmp}/dsh-rc4' \
 		'    mkdir -p "$$dsh_install" && cd "$$dsh_install" && npm init -y' \
 		'    npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24' \
+		'  The Host gates also need this repository'"'"'s probe package installed in that' \
+		'  directory, because the Loader resolves it like any other dependency:' \
+		'    make pack-dsh' \
+		'    cd "$$dsh_install" && npm install --ignore-scripts <this-repo>/$(DSH_PROBE_DIR)/dsh-ensemble-probe-*.tgz' \
 		'  then: make host-check INSTALL_DIR="$$dsh_install"' >&2; \
 		exit 2; }
 	@$(TASKS) install-dir --quiet "$(INSTALL_DIR)"
@@ -290,11 +297,32 @@ host-check: typecheck-host loader-check
 # The real Loader must resolve @deepseek-ai/* from INSTALL_DIR, so it runs from
 # a temporary directory inside that install. Nothing in the repository is
 # touched, and the scratch directory is removed on exit.
+#
+# The scratch directory declares `{"type":"module"}`. `loader-check.ts` uses
+# `import`, and Node walks up to the nearest `package.json` to decide how to
+# parse it. An install created with `npm init -y` writes `"type": "commonjs"`,
+# so without this declaration the module is parsed as CommonJS and fails with
+# "Cannot use import statement outside a module". The declaration belongs to
+# the scratch directory only; the install's own `package.json` is the user's
+# and is never written. `adapters/dsh/typecheck-host.ts` does the same.
+#
+# The probe package must already be installed in INSTALL_DIR: the Loader
+# resolves it like any other dependency. When it is missing, say which command
+# installs it instead of surfacing Node's module-resolution stack.
 loader-check: require-node require-install-dir
+	@test -d "$(INSTALL_DIR)/node_modules/dsh-ensemble-probe" || { \
+		printf '%s\n' "error: no dsh-ensemble-probe installed in $(INSTALL_DIR)." \
+		'  The Loader resolves this repository'"'"'s probe package from that install, so' \
+		'  it must be installed there before the gate can run:' \
+		'    make pack-dsh' \
+		'    cd "'"$(INSTALL_DIR)"'" && npm install --ignore-scripts <this-repo>/$(DSH_PROBE_DIR)/dsh-ensemble-probe-*.tgz' \
+		'  Nothing was installed and nothing was verified.' >&2; \
+		exit 2; }
 	@printf '== loader-check: real Loader against %s\n' "$(INSTALL_DIR)"
 	@scratch=$$(mktemp -d "$(INSTALL_DIR)/.make-loader.XXXXXX") || exit 2; \
 	trap 'rm -rf "$$scratch"' EXIT HUP INT TERM; \
 	cp adapters/dsh/loader-check.ts "$$scratch/loader-check.ts" || exit 1; \
+	printf '{"type":"module"}\n' > "$$scratch/package.json" || exit 1; \
 	cd "$$scratch" && DSH_PROBE_TMP="$$scratch/.probe" $(NODE) loader-check.ts
 
 # Both diagnosis scripts belong to later work. Until they exist, say so and

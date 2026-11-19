@@ -21,19 +21,22 @@ make package-check          # 交付前离线聚合：check + test + pack + insp
 
 ## 准备隔离 rc.4 install（Host 相关 target 的前置）
 
-`typecheck-host`、`host-check`、`profile-check`、`isolation-check` 与 `release-check` 都不针对本工作树跑，而是针对**一次真实安装的 DSH 0.2.2-rc.4**（固定发行基线）运行。原因：Host 入口 import 的 `@deepseek-ai/*` 不在仓库依赖里；对着工作树检查无法证明公开类型与真实 Loader 的行为。该目录不是仓库产物，不提交、不共享给另一容器；仓库外的任意可写目录都可以。
+`typecheck-host`、`host-check`、`profile-check`、`isolation-check` 与 `release-check` 都不针对本工作树跑，而是针对**一次真实安装的 DSH 0.2.2-rc.4**（固定发行基线）运行。原因：Host 入口 import 的 `@deepseek-ai/*` 不在仓库依赖里；对着工作树检查无法证明公开类型与真实 Loader 的行为。这些门有两个前置：**① 一个隔离的 rc.4 安装目录；② 该目录内已安装本仓产出的探针包**——`host-check` 的真实 Loader 步骤要把探针包挂进 Loader，缺包时门会先给出自助装包命令并说明什么都没验证（exit 2），不会抛出模块解析栈。该目录在仓库外，不写仓库、不改 live profile、不提交、不共享给另一容器；任意可写目录都可以。
 
-在仓库外准备一次（用环境变量指向可写位置，不写死路径）：
+在仓库根先生成探针包，再在仓库外准备安装目录（用变量指向可写位置，不写死路径）：
 
 ```bash
-dsh_install="$(mktemp -d)/dsh-rc4"        # 临时且可丢弃；无需预设 TMPDIR
+make pack-dsh                                   # 生成 build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
+dsh_install="$(mktemp -d)/dsh-rc4"              # 临时且可丢弃；无需预设 TMPDIR
 mkdir -p "$dsh_install" && cd "$dsh_install" && npm init -y
 npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24
-cd -                                    # 回到仓库根
+npm install --ignore-scripts \
+  "$(git rev-parse --show-toplevel)"/build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz   # 把探针包装进该 install
+cd -                                            # 回到仓库根
 make host-check INSTALL_DIR="$dsh_install"
 ```
 
-需要 Host gate 时统一用 `INSTALL_DIR="$dsh_install"` 传入。没有该目录时这些 target 会明确报 `INSTALL_DIR is not set` 或配置错误并退出非 0，不会静默跳过。
+第 5 步必须在 `"$dsh_install"` 目录内执行（`cd` 之后、`cd -` 之前）；它只改这个仓库外的 install，不写仓库、不碰 live profile。若当前环境的 npm 缓存目录不可写，给两条 `npm install` 加 `--cache "$dsh_install/.npm-cache"` 即可，不需要改仓库或 live profile。需要 Host gate 时统一用 `INSTALL_DIR="$dsh_install"` 传入。缺少任一前置时门会明确报错并退出非 0（缺变量报 `INSTALL_DIR is not set`，缺探针包时门会直接给出装包命令并说明什么都没验证（exit 2），不会抛出模块解析栈），不会静默跳过。
 
 ## 完整 target 一览（按目标分组）
 
