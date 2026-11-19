@@ -1,6 +1,6 @@
 # Ensemble 从设计到完整交付的路线图
 
-本路线图覆盖面向 DSH **`0.2.2-rc.4`**（固定源码 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）的 ensemble 插件及其可移植方法、OMP 兼容承诺。该提交对应正式标签 `dsh-v0.2.2-rc.4`，已核对 npm 发布；[设计入口](docs/ensemble/README.md)固定精确基线，完整安装与运行验收尚未完成。**当前已完成P0文档闭合与审阅发现处分；P1有界探针已在工作树实现（内容装配与两个包均已通过非作者独立复核），但P1总出口尚未达成。** D01–D12记录设计决定与验收交接，P1–P7记录实现阶段。
+本路线图覆盖面向 DSH **`0.2.2-rc.4`**（固定源码 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）的 ensemble 插件及其可移植方法、OMP 兼容承诺。该提交对应正式标签 `dsh-v0.2.2-rc.4`，已核对 npm 发布；[设计入口](docs/ensemble/README.md)固定精确基线，完整安装与运行验收尚未完成。**当前已完成P0文档闭合与审阅发现处分；P1有界探针的构建、包、Make 主入口与 profile/隔离检查已分别有提交证据（提交 3160333、d6ebc2d），内容装配与两个包均已通过非作者独立复核，但P1总出口尚未达成。** D01–D12记录设计决定与验收交接，P1–P7记录实现阶段。
 
 [设计总览](docs/ensemble/README.md)说明目标和职责；[领域模型](docs/ensemble/DOMAIN-MODEL.md)定义业务；[档案设计](docs/ensemble/ARCHIVE-DESIGN.md)定义持久化与工具；[完整替代矩阵](docs/ensemble/REPLACEMENT-MAP.md)是不可遗漏的表达清单；[实施准备](docs/ensemble/IMPLEMENTATION.md)保留接入来源、技术切片及 R1–R30 验收向量。本文件负责阶段、依赖、范围与交付门槛，不另造一套领域真源。
 
@@ -11,8 +11,8 @@
 | 目标与方法 | Lead 编排/教学、独立贡献、证据取舍、迁移验证已进入[正式技能](skills/ensemble/SKILL.md) | 方法写进文档不等于工作模型已能稳定执行，也不证明模型能力提高 |
 | 领域图景 | 协调、原生执行、学习出版、环境选择、历史存储已分工；状态、动作、权限、引用、迁移与失败交接已有约定 | 领域规则及其真实Adapter仍待实现和运行 |
 | 表达替代 | 旧状态模板各字段、完整研究正文、未知内容、附件、恢复和更正已有映射；内容装配脚本已在工作树生成三条路径的闭合内容 | 尚无 typed schema、真实读写和逐行往返验收；不能声称已替代整个目录 |
-| 技术方案 | 固定 DSH 源码公共 Seam 已研究；选定 Host 外置档案、Git CAS、授权工具及 Client 方向；rc.4 固定发行包上已有用户触发技能与固定参考读回的 Host-only Loader 探针 | 静态来源与帮助 Loader 探针不证明完整 profile 启动、真实 Host/执行世界分离、崩溃恢复和发布包可用；rc.5 运行环境与 rc.4 基线的兼容性未验 |
-| 代码与分发 | 工作树已实现确定性的三路径内容装配、`ensemble_state` writer 与测试；OMP 独立包与 DSH Host-only 探针已在工作树生成并通过本地安装/Loader 检查 | 这些工作树产物尚未提交或发布，不是 DSH 插件产品实现或其完整回归结果；当前没有 DSH Host/Client 产品交付物 |
+| 技术方案 | 固定 DSH 源码公共 Seam 已研究；选定 Host 外置档案、Git CAS、授权工具及 Client 方向；rc.4 固定发行包上已有用户触发技能与固定参考读回的 Host-only Loader 探针；rc.4 上已有 profile 形态矩阵与容器内 confine+spawn 隔离探针的**有界证据** | 容器内隔离探针不等于真实 Host/执行世界分离；help 形态矩阵不等于完整交互或模型请求可用；崩溃恢复与发布包可用仍未验证；rc.5 与 rc.4 兼容性未验，复制树 Loader 的通过不等于标准安装支持（标准安装 peer 求解为 ERESOLVE），`engines.dsh` 不放宽 |
+| 代码与分发 | 三路径内容装配、`ensemble_state` writer、OMP 独立包、DSH Host-only 探针、Make 主入口与 profile/隔离检查均已实现并有提交证据（提交 3160333、d6ebc2d）；包与内容通过本地安装/Loader/非作者复核 | 尚未发布，不是 DSH 产品实现或完整交付；当前没有 DSH Host/Client 产品交付物 |
 | 经验积累 | 已有演进阅读指引、人工整理的因果日志与隔离研究历史 | 临时研究库不是插件自动档案；尚未走通程序管理的审阅、出版、检索与再次应用 |
 | 验证 | 已进行非作者文档复核、引用检查；P1 内容隔离、包/Loader 证据均已通过非作者复核；列出正常例与反例 | 文档与探针可解析/可加载不证明语义正确或产品可用；R1–R30 完整验收、真实模型请求与 UI 验收仍待运行 |
 
@@ -86,7 +86,7 @@ P4 与 P5 的基础 Client/迁移工作可并行，知识界面集成等待 P4 �
 
 ### P1：先证明选用的原生能力能够组合
 
-**当前状态：工作树探针已实现，内容装配与 OMP/DSH 包均已通过非作者独立复核；P1 出口尚未达成。** 确定性内容装配已生成三条闭合路径；OMP 独立安装根已在工作树打包并从本地目录用真实发现器回读；DSH 侧在 rc.4 固定发行包上通过公开 Loader 完成 Host-only 帮助探针（固定参考读回、未知路径拒绝、输出预算、插件释放）。这些产物尚未提交或发布，且不是完整 profile 启动、真实 Host/执行世界隔离、外部 Git/档案写、Client/GUI、授权看板、领域工具或模型选型的证据。逐项命令、证据与未验门槛见 [P1 交付记录](docs/ensemble/P1-DELIVERY.md)。rc.5 运行环境与 rc.4 基线的兼容性未验，`engines.dsh` 仍锁 rc.4。
+**当前状态：探针、Make 主入口与诊断检查均已实现并有提交证据（提交 3160333、d6ebc2d），内容装配与 OMP/DSH 包均已通过非作者独立复核；P1 出口尚未达成。** 确定性内容装配已生成三条闭合路径；OMP 独立安装根已打包并从本地目录用真实发现器回读；DSH 侧在 rc.4 固定发行包上通过公开 Loader 完成 Host-only 探针（固定参考读回、未知路径拒绝、输出预算、插件释放），并新增 profile 形态矩阵与容器内隔离探针：profile 的形态分类与容器内 confine+spawn 探针在 rc.4 上已按预期通过，但**容器内 confinement 不等于 Host/执行世界分离，help 形态矩阵不等于完整交互或模型请求可用**。这些都不是外部 Git/档案写、Client/GUI、授权看板、领域工具或模型选型的证据，产物尚未发布。逐项命令、证据与边界见 [P1 交付记录](docs/ensemble/P1-DELIVERY.md)。rc.5 与 rc.4 兼容性未验：类型 gate 仍 pin rc.4；复制树 Loader 在 rc.5 的通过只是观察，标准安装下 peer 求解为 ERESOLVE，不声明支持 rc.5，`engines.dsh` 不放宽。此前“profile 超时/卡死”是组合缺少 app/startup 行导致启动后静默等待的早期现象，现有矩阵已给出根因分类，不再作为当前状态的结论。
 
 按[三路径隔离设计](docs/ensemble/DISTRIBUTION.md)验证三个独立安装结果：纯skill生成到Git中提交的`skills/ensemble/`，保留`npx skills@latest add vcup/skills`及`--skill ensemble`入口；OMP/DSH独立打包。分别验证正文、参考、README及实际加载闭包，CI检查纯skill生成结果与已提交文件一致。DSH最小包交付用户触发技能、固定参考、一个Host工具和Client入口，按公开Loader/factory约定在没有源码checkout的环境安装；OMP能力在其独立包验收。各产物用显式allowlist排除其它路径及私有档案、环境、研究记录和凭证，根源码仓README不直接入包。
 

@@ -16,7 +16,7 @@
 
 ## 2. 源码如何保持单份维护
 
-拟议内容布局已在工作树实现，尚未提交：`content/ensemble/common/` 为单份方法源，其余三路径专属源由装配脚本组合。
+拟议内容布局已实现并有提交证据（提交 749df3d）：`content/ensemble/common/` 为单份方法源，其余三路径专属源由装配脚本组合。
 
 ```text
 skills/ensemble/    # 生成并提交的纯skill安装产物，含SKILL.md和完整本地参考

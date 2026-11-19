@@ -67,9 +67,12 @@ make host-check INSTALL_DIR=<isolated-rc4-install-dir>       # real Loader behav
 ```
 
 `make profile-check INSTALL_DIR=<isolated-rc4-install-dir>` and `make
-isolation-check` are diagnostic targets: when their underlying scripts are not
-present they exit 2 with an explicit “capability not verified” message, which
-is neither a pass nor a failure.
+isolation-check INSTALL_DIR=<isolated-rc4-install-dir>` are gates: they exit 0
+only when the capability is actually verified; without a usable install they
+exit 2 with an explicit configuration error, so they never report a pass by
+skipping a check. `make diagnose INSTALL_DIR=<isolated-rc4-install-dir>` is
+observation only (`OBSERVATION ONLY — not a check`) and always exits 0 without
+asserting a conclusion.
 
 `typecheck-host.ts` copies the modules beside the install, compiles them with
 that install's `tsc` under `tsconfig.host.json`, and refuses a directory without
