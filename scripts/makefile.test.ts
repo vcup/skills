@@ -138,6 +138,7 @@ describe("help and the default target", () => {
       "host-check",
       "profile-check",
       "isolation-check",
+      "diagnose",
       "install-omp",
       "install-smoke",
       "status",
@@ -364,20 +365,95 @@ describe("Host gates", () => {
   });
 });
 
-describe("unverified capabilities report themselves", () => {
-  test("profile-check fails and says the capability is unverified", async () => {
-    const { code, all } = await make(["profile-check"]);
-    expect(code).toBe(2);
-    expect(all).toContain("not implemented yet");
-    expect(all).toContain("unverified");
-    expect(all).toContain("nothing is claimed");
-  });
-
-  test("isolation-check fails and says the capability is unverified", async () => {
+describe("gates fail closed; diagnose observes", () => {
+  // Contract: a target whose name ends in `-check` is a gate. Exit 0 means every
+  // required check really ran and agreed. A missing prerequisite is a failure,
+  // never a green "partially unverified" summary.
+  test("isolation-check without INSTALL_DIR fails instead of exiting 0", async () => {
     const { code, all } = await make(["isolation-check"]);
     expect(code).toBe(2);
-    expect(all).toContain("not implemented yet");
-    expect(all).toContain("unverified");
+    expect(all).toContain("UNVERIFY");
+    // The gate must not be talked out of its exit code by its own summary text.
+    expect(all).not.toContain("== exit code 0 (partially unverified)");
+  });
+
+  test("isolation-check against a directory that is not an install fails", async () => {
+    // Constructed here rather than borrowing a machine path: the point is that an
+    // INSTALL_DIR was supplied and could not be used.
+    const notAnInstall = await mkdtemp(join(tmpdir(), "not-an-install-"));
+    const { code, all } = await make(["isolation-check", `INSTALL_DIR=${notAnInstall}`]);
+    expect(code).toBe(2);
+    // The gate names the supplied directory as unusable rather than quietly
+    // measuring something else, and says plainly that nothing was verified.
+    expect(all).toContain("CONFIG ERROR");
+    expect(all).toContain("nothing was verified");
+    expect(all).toContain("UNVERIFIED");
+    await rm(notAnInstall, { recursive: true, force: true });
+  });
+
+  test("isolation-check against a usable install runs every probe", async () => {
+    const installDir = process.env.MAKE_TEST_INSTALL_DIR;
+    if (installDir === undefined || installDir === "") {
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      return;
+    }
+    const { code, all } = await make(["isolation-check", `INSTALL_DIR=${installDir}`]);
+    expect(code).toBe(0);
+    expect(all).toMatch(/SUMMARY pass=\d+ refused=\d+ unverify=0 fail=0 total=11/);
+  }, 240_000);
+
+  test("profile-check without INSTALL_DIR fails and claims nothing", async () => {
+    const { code, all } = await make(["profile-check"]);
+    expect(code).toBe(2);
+    expect(all).toContain("UNVERIFIED");
+    expect(all).toContain("no INSTALL_DIR");
+    expect(all).not.toContain("not implemented yet");
+    expect(all).toContain("make profile-check INSTALL_DIR=");
+  });
+
+  test("profile-check against a directory that is not an install fails", async () => {
+    const notAnInstall = await mkdtemp(join(tmpdir(), "not-an-install-"));
+    const { code } = await make(["profile-check", `INSTALL_DIR=${notAnInstall}`]);
+    expect(code).toBe(2);
+    await rm(notAnInstall, { recursive: true, force: true });
+  }, 120_000);
+
+  test("profile-check against a usable install boots profiles and reports PASS", async () => {
+    const installDir = process.env.MAKE_TEST_INSTALL_DIR;
+    if (installDir === undefined || installDir === "") {
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      return;
+    }
+    const { code, all } = await make(["profile-check", `INSTALL_DIR=${installDir}`]);
+    expect(code).toBe(0);
+    expect(all).toContain("PASS:");
+  }, 300_000);
+
+  test("diagnose is observation only: exits 0 and says so", async () => {
+    // `diagnose` asserts nothing, so it is allowed — required — to be green even
+    // when nothing can be verified. That is why it is not called a `-check`.
+    const { code, all } = await make(["diagnose"]);
+    expect(code).toBe(0);
+    expect(all).toContain("OBSERVATION ONLY");
+  }, 120_000);
+
+  test("diagnose never claims verification in its own output", async () => {
+    const { code, all } = await make(["diagnose"]);
+    expect(code).toBe(0);
+    expect(all).toContain("OBSERVATION ONLY");
+    // It reports; it does not conclude.
+    expect(all).not.toContain("PASS:");
+  }, 120_000);
+
+  test("the naming contract is visible in help", async () => {
+    const { stdout } = await make(["help"]);
+    const diagnoseLine = stdout.split("\n").find((line) => line.trimStart().startsWith("diagnose"));
+    expect(diagnoseLine).toBeDefined();
+    expect(diagnoseLine).toContain("observation only");
+    expect(diagnoseLine).toContain("always exits 0");
+    // The gates say that a missing prerequisite is a failure.
+    expect(stdout).toContain("*-check target is a gate");
+    expect(stdout).toContain("Missing prerequisites -> non-zero");
   });
 
   test("inspect reports that nothing is packed instead of inventing output", async () => {
@@ -387,6 +463,60 @@ describe("unverified capabilities report themselves", () => {
     expect(all).toContain("nothing has been packed");
     expect(all).toContain("make pack");
   });
+});
+
+describe("type coverage is a gate, not a claim", () => {
+  // A script that no tsconfig includes is never type-checked by `make check`,
+  // however green the gate looks. Guard the include list itself.
+  test("every scripts/*-check.ts and its test are in the root tsconfig", async () => {
+    const tsconfig = JSON.parse(await readFile(join(REPO_ROOT, "tsconfig.json"), "utf8")) as {
+      include: string[];
+    };
+    const scripts = await readdir(join(REPO_ROOT, "scripts"));
+    // Both naming conventions are in use: `profile-check.ts` and
+    // `check-isolation.ts`. A filter for only one of them would pass while
+    // leaving the other unchecked — the exact gap this test exists to close.
+    const checkScripts = scripts.filter(
+      (name) =>
+        name.endsWith(".ts") &&
+        !name.endsWith(".test.ts") &&
+        (name.endsWith("-check.ts") || name.startsWith("check-")),
+    );
+
+    expect(checkScripts.length).toBeGreaterThan(0);
+    // Prove the matcher actually sees both conventions, so a future rename
+    // cannot make this test vacuous.
+    expect(checkScripts.some((name) => name.endsWith("-check.ts"))).toBe(true);
+    expect(checkScripts.some((name) => name.startsWith("check-"))).toBe(true);
+    for (const name of checkScripts) {
+      expect(tsconfig.include).toContain(`scripts/${name}`);
+      const testFile = `scripts/${name.replace(/\.ts$/, ".test.ts")}`;
+      if (scripts.includes(testFile.replace("scripts/", ""))) {
+        expect(tsconfig.include).toContain(testFile);
+      }
+    }
+  });
+
+  test("the isolation probe modules are type-checked through the check script", async () => {
+    // `adapters/dsh/probes/**` is not in any include list on purpose: it enters
+    // the program by import from check-isolation.ts. Assert that path exists, so
+    // removing the import cannot silently drop the coverage.
+    const entry = await readFile(join(REPO_ROOT, "scripts/check-isolation.ts"), "utf8");
+    expect(entry).toMatch(/from ['"]\.\.\/adapters\/dsh\/probes\/isolation\.ts['"]/);
+
+    const tsconfig = JSON.parse(await readFile(join(REPO_ROOT, "tsconfig.json"), "utf8")) as {
+      include: string[];
+    };
+    expect(tsconfig.include).toContain("scripts/check-isolation.ts");
+  });
+
+  test("make typecheck covers the check scripts, not just the app code", async () => {
+    const { code, all } = await make(["typecheck"]);
+    expect(code).toBe(0);
+    // tsc --noEmit is silent on success; the assertion that matters is that the
+    // include list above is what the gate actually compiles.
+    expect(all.trim()).toBe("");
+  }, 120_000);
 });
 
 describe("release doors", () => {

@@ -76,10 +76,14 @@ help:
 	@printf '  %-16s %s\n' 'pack-dsh' 'DSH probe tarball only'
 	@printf '  %-16s %s\n' 'inspect' 'list the built tarballs and their contents'
 	@printf '%s\n' ''
-	@printf '%s\n' 'Runtime gates — need a real isolated DSH install'
-	@printf '  %-16s %s\n' 'host-check' '[needs INSTALL_DIR] Host types plus the real Loader run'
-	@printf '  %-16s %s\n' 'profile-check' '[needs INSTALL_DIR] DSH profile boot diagnosis (capability not yet verified)'
-	@printf '  %-16s %s\n' 'isolation-check' 'execution-world confinement probe (capability not yet verified)'
+	@printf '%s\n' 'Runtime gates — a *-check target is a gate: it exits 0 only when every'
+	@printf '%s\n' 'required check really ran and agreed. Missing prerequisites -> non-zero.'
+	@printf '  %-16s %s\n' 'host-check' '[needs INSTALL_DIR] gate: Host types + real Loader, both must pass'
+	@printf '  %-16s %s\n' 'profile-check' '[needs INSTALL_DIR] gate: DSH profile boot; missing install is a failure'
+	@printf '  %-16s %s\n' 'isolation-check' '[needs INSTALL_DIR] gate: execution-world confinement must be observed'
+	@printf '%s\n' ''
+	@printf '%s\n' 'Diagnose — observation only, never a gate'
+	@printf '  %-16s %s\n' 'diagnose' '[read-only] observation only: reports what the environment does, asserts nothing, always exits 0'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Install — opt-in, outside the default path'
 	@printf '  %-16s %s\n' 'install-omp' '[writes live profile] needs CONFIRM=yes; installs the local OMP staging root'
@@ -279,7 +283,7 @@ inspect: require-bun
 # ---------------------------------------------------------------------------
 # runtime gates
 # ---------------------------------------------------------------------------
-.PHONY: host-check loader-check profile-check isolation-check
+.PHONY: host-check loader-check profile-check isolation-check diagnose
 
 host-check: typecheck-host loader-check
 
@@ -310,6 +314,16 @@ isolation-check: require-bun
 		'  still unverified. Nothing was run and nothing is claimed.' >&2; \
 		exit 2; }
 	@$(BUN) scripts/check-isolation.ts $(if $(INSTALL_DIR),"$(INSTALL_DIR)")
+
+# Observation, not verification. `diagnose` never asserts anything about the
+# environment, so it always exits 0; that is exactly why it must not be named
+# `-check`. Use the gates above when you need a pass/fail answer.
+diagnose: require-bun
+	@test -f scripts/check-isolation.ts || { \
+		printf '%s\n' 'error: diagnose needs scripts/check-isolation.ts, which does not exist.' \
+		'  Nothing was observed.' >&2; \
+		exit 2; }
+	@$(BUN) scripts/check-isolation.ts $(if $(INSTALL_DIR),"$(INSTALL_DIR)") --observe
 
 # ---------------------------------------------------------------------------
 # install (opt-in)

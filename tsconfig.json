@@ -19,6 +19,10 @@
     "scripts/pack-dsh.test.ts",
     "scripts/project-tasks.ts",
     "scripts/project-tasks.test.ts",
-    "scripts/makefile.test.ts"
+    "scripts/makefile.test.ts",
+    "scripts/profile-check.ts",
+    "scripts/profile-check.test.ts",
+    "scripts/check-isolation.ts",
+    "scripts/check-isolation.test.ts"
   ]
 }
