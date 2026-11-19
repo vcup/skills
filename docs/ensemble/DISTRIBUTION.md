@@ -62,11 +62,11 @@ OMP可保留现有`@vcup/skills`包身份及其它既有技能的交付，DSH使
 OMP 隔离包按“命令 + 输出位置约定”安装（OMP 17.2.15 的安装器接受本地**目录**或 registry spec，不接受 `.tgz` 文件）：
 
 ```bash
-bun scripts/pack-omp.ts
+make pack-omp
 omp install ./build/pack/omp/staging
 ```
 
-产物是本地工作树构建结果，未发布到 registry，远端地址不存在。DSH Host-only 探针包由 `bun scripts/pack-dsh.ts` 生成在 `build/pack/dsh/`，同样未发布。工作树产物可由上述命令重现，不是私有或临时路径。
+产物是本地工作树构建结果，未发布到 registry，远端地址不存在。DSH Host-only 探针包由 `make pack-dsh` 生成在 `build/pack/dsh/`，同样未发布。工作树产物可由上述命令重现，不是私有或临时路径。
 
 原来“给同一包增加DSH exports并携带OMP入口”的方案被此需求取代。需要迁移的是OMP原先指向混合源码仓的Git安装入口（`omp install github:vcup/skills`）；该入口已由本路径的隔离包取代，不再是未解决的远端安装。纯skill的上述命令保留。OMP旧安装的替换由其包管理器完成，保留用户研究记录与配置；迁移说明明确仍交付的其它技能，避免悄悄缩减原包能力。
 

@@ -7,48 +7,48 @@
 下表三态分别报告，互不推导：
 
 - **工作树已实现/已生成/已测试**：产物存在于当前工作树，相关测试与检查已在可复现命令下通过，并已有非作者复核。
-- **已提交**：产物是否已进入产品 Git 提交。本轮所有行为**否**。
+- **已提交**：产物是否进入产品 Git 提交。本表所列产物已有提交证据（提交 749df3d）；这不表示已发布。
 - **已发布/远端可安装**：产物是否已进入 registry 或可从远端安装。本轮所有行为**否**。
 
-凡只有作者自报、未经 task-6/task-9 非作者复核的结论，均标 **未独立复核** 并保持设计文档原时态，不据此改写“工作树已实现”。本文不写 provider/model 清单、环境具体配置、操作流水、私有或临时绝对路径。
+凡只有作者自报、未经非作者独立复核的结论，均标 **未独立复核** 并保持设计文档原时态，不据此改写“工作树已实现”。本文不写 provider/model 清单、环境具体配置、操作流水、私有或临时绝对路径。
 
 ## 2. 交付状态总表
 
 | 切片 | 工作树已实现/已生成/已测试 | 已提交 | 已发布/远端可安装 | 对应 D/C/R | 独立复核 |
 |---|---|---|---|---|---|
-| 确定性三路径内容装配（`content/ensemble/**`、`scripts/build-ensemble.ts`） | 是：`build/check/write(target)`，target 仅 skill/omp/dsh；显式文件清单、SHA256 清单、链接闭包、symlink/越界防护、drift 检查；`skills/ensemble/`（6 文件）由 `check skill` 判定 up to date；OMP/DSH 产物仅在忽略的 `build/ensemble/{omp,dsh}/` | 否 | 否 | D01/C01/C15/R18 | p1-scout 独立验收通过 |
-| 纯 skill 本地安装回读 | 是：真实 `npx skills@1.9.0` 本地安装本地仓成功，`.agents/skills/ensemble` 与产物逐字节一致 | 否 | 否（远端 `vcup/skills` 未验） | C01/C15/R18 | 纳入内容独立验收 |
-| OMP 独立安装根（`scripts/pack-omp.ts`、`adapters/omp/package/`） | 是：staging 14 文件；tgz `build/pack/omp/vcup-skills-0.2.0.tgz`；包身份保留 `@vcup/skills@0.2.0`；真实发现器回读三角色 frontmatter、`autoloadSkills:["ensemble"]`、三个技能与注册工具 `ensemble_state` | 否 | 否 | C01/C15/R18 | task-9 独立复核通过 |
-| DSH Host-only 探针（`adapters/dsh/**`、`scripts/pack-dsh.ts`） | 是：tgz `build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz`；隔离安装 rc.4 发布依赖后经公开 Loader 运行检查 44 PASS / 0 FAIL；固定参考枚举读回、未知名/路径拒绝、输出预算、插件释放 | 否 | 否 | D10/C12/C15/R18 | task-9 独立复核通过（44 PASS/0 FAIL 已由非作者在独立隔离目录重跑） |
-| GitHub Actions 内容一致性工作流（`.github/workflows/ensemble-content.yml`） | 是（仅工作树定义）：只做 `check skill` 与 builder 测试 | 否 | 否（未在 GitHub 实跑） | C15 | 未独立复核 |
+| 确定性三路径内容装配（`content/ensemble/**`、`scripts/build-ensemble.ts`） | 是：`build/check/write(target)`，target 仅 skill/omp/dsh；显式文件清单、SHA256 清单、链接闭包、symlink/越界防护、drift 检查；`skills/ensemble/`（6 文件）由 `check skill` 判定 up to date；OMP/DSH 产物仅在忽略的 `build/ensemble/{omp,dsh}/` | 是（提交 749df3d） | 否 | D01/C01/C15/R18 | p1-scout 独立验收通过 |
+| 纯 skill 本地安装回读 | 是：真实 `npx skills@1.9.0` 本地安装本地仓成功，`.agents/skills/ensemble` 与产物逐字节一致 | 是（提交 749df3d） | 否（远端 `vcup/skills` 未验） | C01/C15/R18 | 纳入内容独立验收 |
+| OMP 独立安装根（`scripts/pack-omp.ts`、`adapters/omp/package/`） | 是：staging 14 文件；tgz `build/pack/omp/vcup-skills-0.2.0.tgz`；包身份保留 `@vcup/skills@0.2.0`；真实发现器回读三角色 frontmatter、`autoloadSkills:["ensemble"]`、三个技能与注册工具 `ensemble_state` | 是（提交 749df3d） | 否 | C01/C15/R18 | 包独立复核通过 |
+| DSH Host-only 探针（`adapters/dsh/**`、`scripts/pack-dsh.ts`） | 是：tgz `build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz`；隔离安装 rc.4 发布依赖后经公开 Loader 运行检查 44 PASS / 0 FAIL；固定参考枚举读回、未知名/路径拒绝、输出预算、插件释放 | 是（提交 749df3d） | 否 | D10/C12/C15/R18 | 包独立复核通过（44 PASS/0 FAIL 已由非作者在独立隔离目录重跑） |
+| GitHub Actions 内容一致性工作流（`.github/workflows/ensemble-content.yml`） | 是（仅工作树定义）：只做 `check skill` 与 builder 测试 | 是（提交 749df3d） | 否（未在 GitHub 实跑） | C15 | 未独立复核 |
 
 ## 3. 稳定可复现命令
 
-全部命令在仓库根执行；输出位置为仓内忽略目录，可由命令重现，不是私有或临时路径。
+当前推荐操作统一走仓库根的 Make 主界面；各 target 的归属与变量见[开发环境与操作指南](../DEVELOPMENT.md)。以下 make 命令的确切输出与退出码待可运行候选实测确认。
 
 ```bash
-# 内容装配一致性
-bun scripts/build-ensemble.ts check skill
-bun scripts/build-ensemble.ts check omp
-bun scripts/build-ensemble.ts check dsh
+# 内容装配一致性（TARGET 默认 skill，非法值 exit 2）
+make content TARGET=skill
+make content TARGET=omp
+make content TARGET=dsh
 
 # OMP 独立包：生成到本地 staging，从目录安装
-bun scripts/pack-omp.ts
+make pack-omp
 omp install ./build/pack/omp/staging
 
 # DSH Host-only 探针包：生成到 build/pack/dsh
-bun scripts/pack-dsh.ts
+make pack-dsh
 
 # 文档与全量回归
-python3 scripts/check-docs.py
-bun test
-tsc --noEmit
+make docs
+make test
+make typecheck
 
 # DSH Host 入口类型检查（独立 gate，需已存在的隔离 rc.4 install）
-bun adapters/dsh/typecheck-host.ts <isolated-rc4-install-dir>
+make typecheck-host INSTALL_DIR=<isolated-rc4-install-dir>
 ```
 
-`index.ts` / `loader-check.ts` import `@deepseek-ai/*`，不在任何仓库 tsconfig 内，因此 `tsc --noEmit` 与 `tsc -p adapters/dsh/tsconfig.json` 都不检查 Host 入口。Host 入口由独立脚本对着真实的隔离 rc.4 install 检查（`adapters/dsh/tsconfig.host.json` + `adapters/dsh/typecheck-host.ts`），属于单独 gate，不属于 `bun run typecheck`。实测：指向已存在的隔离 install 时 exit 0；指向没有 install 的仓库根时 exit 2 并明确报错。
+`index.ts` / `loader-check.ts` import `@deepseek-ai/*`，不在任何仓库 tsconfig 内，因此 `tsc --noEmit` 与 `tsc -p adapters/dsh/tsconfig.json` 都不检查 Host 入口。Host 入口由独立脚本对着真实的隔离 rc.4 install 检查（`adapters/dsh/tsconfig.host.json` + `adapters/dsh/typecheck-host.ts`），属于单独 gate，不属于仓库的 typecheck（`make typecheck`）。实测：指向已存在的隔离 install 时 exit 0；指向没有 install 的仓库根时 exit 2 并明确报错。
 
 构建 API 契约：`build(target)` 只在内存组装并返回 `{target, files, manifest}`，`files[].content` 供打包器写入自己的 staging root；`write(target)` 只覆盖获准文件；`check(target)` 比较产物与磁盘并报告漂移。打包器不读取默认 staging 路径，避免陈旧产物泄漏。
 
@@ -65,6 +65,6 @@ bun adapters/dsh/typecheck-host.ts <isolated-rc4-install-dir>
 - GitHub 工作流未在 GitHub 实跑；工作树 `check skill` 一致不等于 CI 已运行。
 - rc.5 运行 host 与 rc.4 基线兼容性未验；不据此放宽 `engines.dsh` 或声明支持 rc.5。
 - P1 出口仍是“技术探针，不是协调功能完成”：[ROADMAP 阶段表](../../ROADMAP.md#4-从设计闭合到交付的阶段)与 §5 的 D/C/R 覆盖均不因本轮工作树产物而批量标记完成。
-- DSH 不提供 `verify`/`check` 子命令：`bundle-manifest.json` 是打包时生成的产物清单，不是对已产出 tgz 的校验输入。重跑 `bun scripts/pack-dsh.ts` 会覆盖并重新生成 staging 与 tgz，不提供对已发布 tgz 的篡改检测或签名校验；这是明确的能力边界，属后续能力，不是本轮交付要求。
+- DSH 不提供 `verify`/`check` 子命令：`bundle-manifest.json` 是打包时生成的产物清单，不是对已产出 tgz 的校验输入。重跑 `make pack-dsh` 会覆盖并重新生成 staging 与 tgz，不提供对已发布 tgz 的篡改检测或签名校验；这是明确的能力边界，属后续能力，不是本轮交付要求。
 - DSH Host 入口类型检查需要一个已存在的隔离 rc.4 install；在没有该 install 的环境里这条 gate 不可运行，因此不能把“双 tsc 通过”表述为“DSH 全部类型已检”。
-- task-9 对两个包的独立复核结论为**通过**；收尾时提出的两项条件均已关闭（OMP 包内 README 安装命令已修正并复核；DSH 不新增 verify 能力，已在上条记录为明确能力边界）。复核通过不代表 P1 出口或产品验收完成。
+- 两个包的独立复核结论为**通过**；收尾时提出的两项条件均已关闭（OMP 包内 README 安装命令已修正并复核；DSH 不新增 verify 能力，已在上条记录为明确能力边界）。复核通过不代表 P1 出口或产品验收完成。

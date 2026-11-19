@@ -4,12 +4,16 @@ name: Ensemble content
 # when the committed directory differs from what the maintained source produces.
 # This catches the case where a source edit lands without its generated output.
 #
+# The workflow drives the repository `Makefile`, the same interface maintainers
+# use locally; package.json has no `scripts` block and nothing here calls
+# `npm run` or `bun run`.
+#
 # Local status: this workflow has NOT been executed on GitHub from this
-# repository. The same command was run locally and reported the committed
+# repository. The same commands were run locally and reported the committed
 # artifact as up to date. Treat remote execution as unverified.
 #
-# Scope: content consistency only. This does not install the skill, build the
-# OMP or DSH packages, or exercise any runtime.
+# Scope: content consistency and the builder tests only. This does not install
+# the skill, build the OMP or DSH packages, or exercise any runtime.
 
 on:
   push:
@@ -18,6 +22,10 @@ on:
       - "skills/ensemble/**"
       - "scripts/build-ensemble.ts"
       - "scripts/build-ensemble.test.ts"
+      - "scripts/project-tasks.ts"
+      - "scripts/makefile.test.ts"
+      - "Makefile"
+      - "package.json"
       - ".github/workflows/ensemble-content.yml"
   pull_request:
     paths:
@@ -25,6 +33,10 @@ on:
       - "skills/ensemble/**"
       - "scripts/build-ensemble.ts"
       - "scripts/build-ensemble.test.ts"
+      - "scripts/project-tasks.ts"
+      - "scripts/makefile.test.ts"
+      - "Makefile"
+      - "package.json"
       - ".github/workflows/ensemble-content.yml"
 
 permissions:
@@ -43,8 +55,13 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - name: Check generated pure-skill artifact
-        run: bun scripts/build-ensemble.ts check skill
+      - name: Install locked dependencies and run the offline gate
+        run: make setup
 
-      - name: Test the builder
-        run: bun test scripts/build-ensemble.test.ts
+      - name: Check generated pure-skill artifact
+        run: make content TARGET=skill
+
+      # `make setup` above already ran `check` (install -> doctor -> check), so it
+      # is not repeated here; the suite is the additional step.
+      - name: Run the test suite
+        run: make test

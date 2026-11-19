@@ -1,7 +1,7 @@
 {
   "//": "Type check for the Host entry modules that import @deepseek-ai/*: index.ts and loader-check.ts.",
   "//why-separate": "The root tsconfig.json must not pull these files in: they need the published @deepseek-ai/* packages, which are not root dependencies. This program is compiled against a real isolated rc.4 install.",
-  "//usage": "bun adapters/dsh/typecheck-host.ts <isolated-install-dir> — copies this file beside that install and runs its tsc. Not part of `bun run typecheck`.",
+  "//usage": "bun adapters/dsh/typecheck-host.ts <isolated-install-dir> — copies this file beside that install and runs its tsc. Not part of `make typecheck`.",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],

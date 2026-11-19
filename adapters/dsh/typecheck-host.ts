@@ -22,8 +22,8 @@
  *   mkdir -p /tmp/dsh-rc4 && cd /tmp/dsh-rc4 && npm init -y
  *   npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24
  *
- * This is a separate gate from `bun run typecheck`; it is not part of that
- * script and never runs in CI without such an install.
+ * This is a separate gate from `make typecheck`; it is not part of that
+ * target and never runs in CI without such an install.
  *
  * @module adapters/dsh/typecheck-host
  */

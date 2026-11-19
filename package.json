@@ -3,12 +3,6 @@
   "version": "0.2.0",
   "description": "Portable skills with native OMP ensemble agents and state tooling.",
   "repository": "github:vcup/skills",
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "build:ensemble": "bun scripts/build-ensemble.ts build",
-    "check:ensemble": "bun scripts/build-ensemble.ts check"
-  },
   "devDependencies": {
     "@oh-my-pi/pi-coding-agent": "17.2.15",
     "@types/bun": "^1.3.0",

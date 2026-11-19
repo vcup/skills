@@ -21,7 +21,7 @@ not](#what-this-is-not).
 | `loader-check.ts` | Real-Loader verification script. Not a `*.test.ts`; runs against an isolated install. |
 | `tsconfig.json` | Type check for the DSH modules that do not import `@deepseek-ai/*` (`meta`, `reference`, `skill`) plus `scripts/pack-dsh*` and `typecheck-host.ts`. |
 | `tsconfig.host.json` | Compiler options for the Host entry modules (`index.ts`, `loader-check.ts`), which import `@deepseek-ai/*` and are therefore **not** in any repository tsconfig. |
-| `typecheck-host.ts` | Runs the check above against a real isolated rc.4 install. Separate gate; not part of `bun run typecheck`. |
+| `typecheck-host.ts` | Runs the check above against a real isolated rc.4 install. Separate gate; not part of the repository typecheck. |
 
 ## Package
 
@@ -48,44 +48,44 @@ skills/ensemble/EVOLUTION-TEMPLATE.md
 
 ## Commands
 
+Repository operations go through the Make entry point (see the [development guide](../../docs/DEVELOPMENT.md)):
+
 ```bash
-bun scripts/pack-dsh.ts                               # stage + npm pack
-bun test scripts/pack-dsh.test.ts                     # repository tests
-./node_modules/.bin/tsc -p adapters/dsh/tsconfig.json # type check, dependency-free modules
+make pack-dsh                 # stage + npm pack
+make test-narrow              # repository tests for this probe
+make typecheck                # type check, dependency-free modules
 ```
 
 Two checks need an installation that resolves `@deepseek-ai/*`; neither is part
-of `bun test` or `bun run typecheck`:
+of the full test or repository typecheck. Pass an already prepared isolated
+rc.4 install through `INSTALL_DIR` (see the development guide for how it is
+prepared):
 
 ```bash
-# one-time isolated install root (never added to this repository's dependencies)
-mkdir -p /tmp/dsh-rc4 && cd /tmp/dsh-rc4 && npm init -y
-npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24
-
-# Host entry types: index.ts + loader-check.ts against the published .d.ts files
-bun adapters/dsh/typecheck-host.ts /tmp/dsh-rc4
-
-# real Loader behaviour
-cd /tmp/dsh-rc4 && npm install --ignore-scripts <tarball>
-cp <repo>/adapters/dsh/loader-check.ts . && node loader-check.ts   # PASS/FAIL per check
+make typecheck-host INSTALL_DIR=<isolated-rc4-install-dir>   # Host entry types
+make host-check INSTALL_DIR=<isolated-rc4-install-dir>       # real Loader behaviour
 ```
+
+`make profile-check INSTALL_DIR=<isolated-rc4-install-dir>` and `make
+isolation-check` are diagnostic targets: when their underlying scripts are not
+present they exit 2 with an explicit “capability not verified” message, which
+is neither a pass nor a failure.
 
 `typecheck-host.ts` copies the modules beside the install, compiles them with
 that install's `tsc` under `tsconfig.host.json`, and refuses a directory without
 `@deepseek-ai/dsh-skill@0.2.2-rc.4`. No shim, stub, or hand-written declaration
 is involved. It proves the Host entry modules type-check against the published
-rc.4 types; it is not part of `bun run typecheck`, and nothing in this repository
+rc.4 types; it is not part of the repository typecheck (`make typecheck`), and nothing in this repository
 type-checks `index.ts` or `loader-check.ts` without such an install.
 
 ## What was run, and where it stops
 
-Observed in a container-only isolated install (`npm install
---ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4` plus this tarball, `DSH_HOME`
-under `/tmp`):
+Observed in a container-only isolated install (published rc.4 packages plus this
+tarball, with an isolated home):
 
 | Command | Result |
 |---|---|
-| `bun scripts/pack-dsh.ts` | exit 0, 11 files, stable sha256 across runs |
+| `make pack-dsh`（同一脚本） | exit 0, 11 files, stable sha256 across runs |
 | `bun test` | exit 0; the 18 probe tests pass |
 | `tsc -p adapters/dsh/tsconfig.json` | exit 0 (dependency-free modules + pack scripts) |
 | `bun adapters/dsh/typecheck-host.ts <install>` | exit 0 — `index.ts` + `loader-check.ts` against published rc.4 types |

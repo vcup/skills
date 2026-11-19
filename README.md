@@ -8,10 +8,10 @@ Portable skills packaged with native Oh My Pi capabilities where needed.
 
 The isolated OMP package is a local artifact: it is **not published to a registry and has no remote address**. OMP 17.2.15's installer accepts a local directory or a registry spec, but not a `.tgz` file. How you install depends on what you have:
 
-- **Maintainers, inside the mother repository working tree:** build the staging root from the repository root, then install that directory:
+- **Maintainers, inside the mother repository working tree:** build the staging root with the Make entry point, then install that directory:
 
   ```bash
-  bun scripts/pack-omp.ts
+  make pack-omp
   omp install ./build/pack/omp/staging
   ```
 
@@ -77,4 +77,4 @@ Maintainer design: [separate ensemble distributions](docs/ensemble/DISTRIBUTION.
 
 ## Version control
 
-Keep product changes under this repository's conventions. Concrete environment configuration and high-frequency coordination/learning history belong in separate private storage, not merely separate commits here. A managed adapter maintains them through tools outside the workspace; current OMP only provides the documented state writer. The [DSH plugin design](docs/ensemble/README.md) specifies the proposed managed workflow. The [roadmap](ROADMAP.md) assesses its current stage and plans design completion, implementation, and acceptance of the full feature set. Durable [research and review evidence](docs/ensemble/research/README.md) and the [design evolution](docs/ensemble/EVOLUTION.md) belong in this repository alongside the design they support. Run `python3 scripts/check-docs.py` to check maintained documentation without private scratch files. The current [P1 delivery record](docs/ensemble/P1-DELIVERY.md) reports what the working-tree probes have verified and what remains unverified.
+Keep product changes under this repository's conventions. Concrete environment configuration and high-frequency coordination/learning history belong in separate private storage, not merely separate commits here. A managed adapter maintains them through tools outside the workspace; current OMP only provides the documented state writer. The [DSH plugin design](docs/ensemble/README.md) specifies the proposed managed workflow. The [roadmap](ROADMAP.md) assesses its current stage and plans design completion, implementation, and acceptance of the full feature set. Durable [research and review evidence](docs/ensemble/research/README.md) and the [design evolution](docs/ensemble/EVOLUTION.md) belong in this repository alongside the design they support. Run `make docs` to check maintained documentation without private scratch files. The current [P1 delivery record](docs/ensemble/P1-DELIVERY.md) reports what the working-tree probes have verified and what remains unverified. For repository operations and target variables see the [development guide](docs/DEVELOPMENT.md).

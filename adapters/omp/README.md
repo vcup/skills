@@ -3,7 +3,7 @@
 The isolated OMP package is built in the working tree and installed from its local staging directory. It is **not published to a registry and has no remote address**. Build it from the repository root, then install the local directory:
 
 ```bash
-bun scripts/pack-omp.ts
+make pack-omp
 omp install ./build/pack/omp/staging
 ```
 
