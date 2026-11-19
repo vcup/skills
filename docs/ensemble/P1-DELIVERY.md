@@ -1,6 +1,6 @@
 # P1 有界探针交付记录（维护者用）
 
-本记录只汇总 P1 有界探针在**工作树**中的实现与验证状态，面向维护者与独立验收者；它不是发布说明，也不把探针等同于 [P1 总出口](../../ROADMAP.md#p1先证明选用的原生能力能够组合)。设计基线固定为 DSH `0.2.2-rc.4`（提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）；当前运行 host 为 rc.5，与 rc.4 基线的兼容性**未验**，`engines.dsh` 仍锁 rc.4，不放宽。三路径分发约定见[分发设计](DISTRIBUTION.md)，验收向量见[实施准备](IMPLEMENTATION.md#6-代表输入与预期结果)。
+本记录只汇总 P1 有界探针在**工作树**中的实现与验证状态，面向维护者与独立验收者；它不是发布说明，也不把探针等同于 [P1 总出口](../../ROADMAP.md#p1先证明选用的原生能力能够组合)。设计基线固定为 DSH `0.2.2-rc.4`（提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）；当前运行 host 为 rc.5：Host 入口在 rc.5 公开类型下经隔离实验编译通过（负向对照有效），但正式类型 gate 仍 pin rc.4，运行期行为与整体兼容性未验；`engines.dsh` 仍锁 rc.4，不放宽。三路径分发约定见[分发设计](DISTRIBUTION.md)，验收向量见[实施准备](IMPLEMENTATION.md#6-代表输入与预期结果)。
 
 ## 1. 状态口径
 
@@ -66,7 +66,10 @@ make typecheck-host INSTALL_DIR=<isolated-rc4-install-dir>
 - OMP 未验：registry 发布、live profile 安装、交互式会话 UI 呈现、旧 `omp install github:vcup/skills` 入口的真实迁移流程。
 - 远端 `vcup/skills` 未发布/未验；纯 skill 的 `npx skills@latest add vcup/skills` Git 入口保留，本地安装证据不延伸到远端。
 - GitHub 工作流未在 GitHub 实跑；工作树 `check skill` 一致不等于 CI 已运行。
-- rc.4 是唯一设计与类型 gate 基线。另有实验性 rc.5 类型观察（复制包树形态下通过），但标准安装的 peer 求解为 ERESOLVE；这只是在实验形态下的观察，不声明支持 rc.5，不放宽 `engines.dsh`。
+- rc.4 是唯一设计与类型 gate 基线。
+- **类型面实验观察（不是门）**：用 rc.5 自带的公开发布 tsc 在隔离 install 内编译 Host 入口，0 error，注入的类型错误能被抓到 → rc.5 类型面实验通过；正式 `typecheck-host` 仍 pin rc.4。
+- **Loader 观察**：以包树复制形态在 rc.5 下运行 44 项，全部通过；此形态不是标准安装。
+- **标准安装**：向 rc.5 标准 `npm install` 探针包被 peer 求解拒绝（ERESOLVE），强制安装会移除 21 个 peer 包 → 支持范围不扩大，不声明支持 rc.5，不放宽 `engines.dsh`。
 - P1 出口仍是“技术探针，不是协调功能完成”：[ROADMAP 阶段表](../../ROADMAP.md#4-从设计闭合到交付的阶段)与 §5 的 D/C/R 覆盖均不因本轮工作树产物而批量标记完成。
 - DSH 不提供 `verify`/`check` 子命令：`bundle-manifest.json` 是打包时生成的产物清单，不是对已产出 tgz 的校验输入。重跑 `make pack-dsh` 会覆盖并重新生成 staging 与 tgz，不提供对已发布 tgz 的篡改检测或签名校验；这是明确的能力边界，属后续能力，不是本轮交付要求。
 - DSH Host 入口类型检查需要一个已存在的隔离 rc.4 install；在没有该 install 的环境里这条 gate 不可运行，因此不能把“双 tsc 通过”表述为“DSH 全部类型已检”。
