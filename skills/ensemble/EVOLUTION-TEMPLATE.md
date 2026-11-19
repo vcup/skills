@@ -2,7 +2,7 @@
 
 An evolution reading explains how evidence changed a design or working method so later readers can learn and challenge it. It is distinct from a current checkpoint, a chronological activity list, and a catalog of reusable lessons.
 
-With managed plugin support, supply the fields below through the reflection tools. The plugin assigns entry identities and ordering, checks references, manages review/publication, and renders ordinary Markdown outside the workspace. The model does not create directories, edit generated documents, allocate numbers, or run Git. A skill-only workflow can use the same questions in its isolated records repository.
+Supply the fields below through the records procedure in [`SKILL.md`](SKILL.md#records-on-this-path). That procedure owns entry identities, ordering, reference checks, review state, and rendered output; a model supplying claims and evidence does not create directories, edit generated documents, allocate numbers, or run Git.
 
 ## Questions for one proposed entry
 

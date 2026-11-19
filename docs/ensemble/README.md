@@ -1,6 +1,6 @@
 # Ensemble：领域与插件设计
 
-这是面向 DSH `0.2.2-rc.4` 的插件设计与实施准备。P0约定已覆盖领域动作、权限、存储、管理与三条完整旅程；[路线图](../../ROADMAP.md)记录设计复核和P1–P7交付阶段。DSH产品实现从P1组合实验开始。当前可使用的可移植方法见[技能](../../skills/ensemble/SKILL.md)、[术语](../../skills/ensemble/GLOSSARY.md)和[演进阅读指引](../../skills/ensemble/EVOLUTION-TEMPLATE.md)，现有适配见[OMP指南](../../adapters/omp/README.md)。
+这是面向 DSH `0.2.2-rc.4` 的插件设计与实施准备。P0约定已覆盖领域动作、权限、存储、管理与三条完整旅程；[路线图](../../ROADMAP.md)记录设计复核和P1–P7交付阶段。DSH 产品实现尚未开始（领域工具、Client 与外置 archive 均未实现）；工作树中已有 P1 的**有界产物/技术探针**——确定性内容装配、OMP 独立包和 DSH **Host-only 探针**（公开 Loader 上的技能注册与固定参考读回），它们不是 DSH 产品实现，证据与未验门槛见 [P1 交付记录](P1-DELIVERY.md)。当前可使用的可移植方法见[技能](../../skills/ensemble/SKILL.md)、[术语](../../skills/ensemble/GLOSSARY.md)和[演进阅读指引](../../skills/ensemble/EVOLUTION-TEMPLATE.md)，现有适配见[OMP指南](../../adapters/omp/README.md)。
 
 接入基线固定为正式标签 `dsh-v0.2.2-rc.4`，提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`；已核对[源码包清单](https://github.com/deepseek-ai/deepseek-harness/blob/3f321d32bfe382212a8ed8785c1d47a5a300aa23/package.json#L1-L9)和[npm 精确版本](https://registry.npmjs.org/@deepseek-ai%2Fdsh/0.2.2-rc.4)。核验时 `next` 指向该版，但可变标签不作为可复现依赖。开发分支即使包版本相同，也不能替代发行源码的接口依据；已确认发布不等于本插件完成安装或运行验收。支持该基线的统一subagent树。此前核验的npm `latest`指向rc.1；该版仍使用[独立具名Team创建入口](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/experimental/tool-agent-team/src/index.ts)，不属于本适配目标。具体部署的模型/provider/effort、端点与凭证不属于本仓库。
 
@@ -78,6 +78,6 @@ flowchart LR
 
 ## 完备程度与边界
 
-目前确定了正常操作、领域事实、权限原则、持久化提交点、学习出版流程和首批验收向量。尚未建立 DSH 实际加载、Host Git 同域组合、崩溃注入、跨模型请求及 UI 的运行证据，详见[实施门槛](IMPLEMENTATION.md)。这些待验证项是实施任务，不以旧 Team fallback 或额外运行时绕开。
+目前确定了正常操作、领域事实、权限原则、持久化提交点、学习出版流程和首批验收向量。工作树探针已证明固定包可被 rc.4 公开 Loader 加载、固定参考可读回、OMP 独立根可被真实发现器回读；尚未建立 DSH 完整 profile 启动、Host/执行世界隔离、崩溃注入、跨模型请求及 UI 的运行证据，详见[实施门槛](IMPLEMENTATION.md)和 [P1 交付记录](P1-DELIVERY.md)。这些待验证项是实施任务，不以旧 Team fallback 或额外运行时绕开。
 
 产品仓库保存可移植方法、稳定领域设计、代码，以及支持它们的源码研究、审阅处分和设计演进。具体环境偏好、操作流水和未整理的运行草稿保存在私有档案；有长期价值的研究与因果解释整理后进入[研究目录](research/README.md)，随产品共享维护。一个集中档案根可以容纳多个相互隔离的项目仓库；“集约”不等于把所有项目和环境记录混进同一提交流。

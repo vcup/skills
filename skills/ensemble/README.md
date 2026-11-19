@@ -173,13 +173,13 @@ The Lead's own guidance can create a shared blind spot. Preserve an evaluation p
 
 ### Persist coordination through its owner
 
-In plugin-managed mode, use domain tools to open work, record contributions and decisions, and associate verification with the candidate. The program maintains the compact [`STATE-TEMPLATE.md`](STATE-TEMPLATE.md) view and version history outside the workspace. Models do not rewrite generated Markdown or run archive Git commands. Native agent/task state remains owned by the harness.
+Coordination records have a storage owner distinct from the product commit stream. The Lead records contributions, decisions, and the verification attached to the candidate through the records procedure in [`SKILL.md`](SKILL.md#records-on-this-path), which names the writer, the location, and what that writer actually guarantees. Native agent and task state remain owned by the harness, and frequent history stays out of product commits.
 
-For skill-only use, keep the equivalent checkpoint in a separate, locally excluded records area. Current OMP's `ensemble_state` only writes its allowed workspace path; it does not provision an external archive or commit history. Do not claim managed storage where no adapter provides it.
+Do not claim managed storage, external archives, or history commits that the records procedure does not provide. Report a persistence gap as a gap.
 
 ### Produce readings worth revisiting
 
-A checkpoint answers what matters now; work history records changes; an evolution reading explains what evidence changed understanding and what later readers can learn. [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md) defines its causal questions, sequential ordering without narrative timestamps or work durations, review, corrections, and domain splitting. With managed archive support, the adapter manages identities, source links, publication, and generated documents. Otherwise, the Lead maintains the isolated records and review status; the Lead and reviewers assess whether the evidence supports the interpretation.
+A checkpoint answers what matters now; work history records changes; an evolution reading explains what evidence changed understanding and what later readers can learn. [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md) defines its causal questions, sequential ordering without narrative timestamps or work durations, review, corrections, and domain splitting. Entry identity, source links, review state, and rendered documents belong to the records owner named in [`SKILL.md`](SKILL.md#records-on-this-path); the Lead and reviewers assess whether the evidence supports the interpretation.
 
 Record material turns, including failed approaches and limits, rather than narrating every tool call. Retrieve relevant lessons by problem and applicability, inspect their evidence, and test whether they still hold. A fresh context given a prior answer is not an independent evaluation of that answer. Promote a durable method change to this repository only after review; keep environment-specific advice and frequent drafts in the isolated archive.
 
@@ -211,8 +211,32 @@ Preserve uncertainty and its consequences when observations cannot decide. Ask t
 
 ## Harness integration
 
-Use the strongest native capabilities the harness exposes: agent and model discovery, role-specific prompts and tools, isolated writers, direct artifacts, communication, notifications, and path-safe state tools. Do not recreate a missing capability through mandatory ceremony when an adapter can provide it directly.
+Use the strongest native capabilities the harness exposes: agent and model discovery, role-specific prompts and tools, isolated writers, direct artifacts, communication, notifications, and path-safe state tools. Do not recreate a missing capability through mandatory ceremony when the harness can provide it directly.
 
 The method still requires independent attempts, shared ground truth, assigned coverage, comparable artifacts or observations, and one accepted deliverable. If a harness lacks a useful capability, adapt the composition locally; do not turn that fallback into the portable method.
 
-Product source, maintained contracts, reusable method changes, and durable research, review evidence, and design evolution follow product repository conventions. Concrete environment configuration, frequent coordination changes, and unprocessed learning logs have a separate storage and history owner; separate commits in the same repository are insufficient isolation. Promote useful findings and explanations into maintained project documentation instead of leaving their only copy in temporary storage. The repository's [DSH design](https://github.com/vcup/skills/blob/main/docs/ensemble/README.md) specifies domain tools and an entirely out-of-workspace archive. Those adapter documents are maintained separately from the portable skill; use only managed capabilities actually exposed by the current harness.
+Product source, maintained contracts, reusable method changes, and durable research, review evidence, and design evolution follow product repository conventions. Concrete environment configuration, frequent coordination changes, and unprocessed learning logs have a separate storage and history owner; separate commits in the same repository are insufficient isolation. Promote useful findings and explanations into maintained project documentation instead of leaving their only copy in temporary storage. Use only the capabilities this path actually exposes, and describe them as this path exposes them.
+
+## Installation
+
+This skill installs from its Git source; no build step runs at install time and no file outside the installed directory is required.
+
+```bash
+npx skills@latest add vcup/skills
+npx skills@latest add vcup/skills --skill ensemble
+```
+
+The first command discovers the skills available in the repository; the second selects `ensemble` directly. `@latest` selects the installer version, not an ensemble release version. Record the installer version and repository revision you actually resolved. Add `-a <agent>` to select the target harness.
+
+`npx skills` installs the method under `skills/`. It does not install runtime agents or tools.
+
+## Records on this path
+
+This installation is a portable skill directory: the complete method and its local references, readable without a build step or files outside the directory.
+
+- **Checkpoint:** the Lead keeps it in a records area outside this directory and outside the product commit stream, using ordinary authorized file tools. [`STATE-TEMPLATE.md`](STATE-TEMPLATE.md) lists the fields.
+- **Evolution readings:** same records area, following [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md).
+- **What you own:** invocation identity, numbering, history, and review status are yours to allocate and maintain. Nothing here validates the checkpoint, serializes writers, or commits history.
+- **Updates:** the directory is generated from a single maintained source and committed. Update it through your harness's normal skill installation rather than editing files in place.
+
+See [`SKILL.md`](SKILL.md#records-on-this-path) for the operational statement and the duplicate-installation rule.

@@ -6,7 +6,16 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["bun", "node"]
   },
-  "include": ["adapters/**/*.ts"]
+  "include": [
+    "adapters/omp/**/*.ts",
+    "scripts/build-ensemble.ts",
+    "scripts/build-ensemble.test.ts",
+    "scripts/pack-omp.ts",
+    "scripts/pack-omp.test.ts",
+    "scripts/pack-dsh.ts",
+    "scripts/pack-dsh.test.ts"
+  ]
 }

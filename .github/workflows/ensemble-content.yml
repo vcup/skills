@@ -1,0 +1,50 @@
+name: Ensemble content
+
+# Regenerates the committed pure-skill artifact from `content/ensemble/` and fails
+# when the committed directory differs from what the maintained source produces.
+# This catches the case where a source edit lands without its generated output.
+#
+# Local status: this workflow has NOT been executed on GitHub from this
+# repository. The same command was run locally and reported the committed
+# artifact as up to date. Treat remote execution as unverified.
+#
+# Scope: content consistency only. This does not install the skill, build the
+# OMP or DSH packages, or exercise any runtime.
+
+on:
+  push:
+    paths:
+      - "content/ensemble/**"
+      - "skills/ensemble/**"
+      - "scripts/build-ensemble.ts"
+      - "scripts/build-ensemble.test.ts"
+      - ".github/workflows/ensemble-content.yml"
+  pull_request:
+    paths:
+      - "content/ensemble/**"
+      - "skills/ensemble/**"
+      - "scripts/build-ensemble.ts"
+      - "scripts/build-ensemble.test.ts"
+      - ".github/workflows/ensemble-content.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  content:
+    name: Generated skill matches source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Check generated pure-skill artifact
+        run: bun scripts/build-ensemble.ts check skill
+
+      - name: Test the builder
+        run: bun test scripts/build-ensemble.test.ts

@@ -282,7 +282,7 @@ For research, documentation, or decisions without executable artifacts, use mate
 - **Intent:** Resume from ground truth without conversation memory.
 - **Shape:** read invocation state → inspect current candidate and evidence → refresh stale observations → resume the next useful pattern.
 - **Signals:** interruption, handoff, or resumed session.
-- **Scale:** one current invocation checkpoint returned by managed tools, plus relevant source and artifact pointers; skill-only mode uses its isolated state document.
+- **Scale:** one current invocation checkpoint read from wherever [`SKILL.md`](SKILL.md#records-on-this-path) stores it, plus relevant source and artifact pointers.
 - **Combinations:** all patterns, especially `Trace authority and state`, `Preserve and disposition findings`, and `Check three-way readiness`.
 - **Output:** current outcome, coverage, contributions, decisions, candidate, verification, and next action.
 - **Failures:** conversation as technical memory; work ledger; copied reports; append-only event log; stale state outranking source.
@@ -290,9 +290,9 @@ For research, documentation, or decisions without executable artifacts, use mate
 ## Submit a durable state
 
 - **Intent:** Keep coordination recoverable without adding frequent records or environment configuration to product history.
-- **Shape:** validate candidate → save domain actions through managed tools, or update the manual checkpoint → confirm the receipt or saved content/history → deliver product under its own conventions.
+- **Shape:** validate candidate → save the checkpoint through the storage owner named in [`SKILL.md`](SKILL.md#records-on-this-path) → confirm the receipt or saved content/history → deliver product under its own conventions.
 - **Signals:** material decision, changed candidate, handoff, interruption, or delivery.
-- **Scale:** managed mode uses an out-of-workspace archive; skill-only mode uses an isolated records area and reports missing durability. Read-only subject work needs no code submission.
+- **Scale:** one checkpoint per invocation in the storage this path supports, reporting the durability it actually provides. Read-only subject work needs no code submission.
 - **Combinations:** `Implement under clear ownership`, `Validate the intended state`, `Recover from a checkpoint`, `Deliver and synthesize`.
 - **Output:** identifiable candidate, observed verification, and separately confirmed archive persistence.
 - **Failures:** commit treated as correctness; manual editing of generated documents; source/record histories merely separated into commits in one repo; save failure hidden.
@@ -317,7 +317,7 @@ For research, documentation, or decisions without executable artifacts, use mate
 - **Output:** reviewed explanation, limits, next test, and stable links; optionally a separately assessed reusable lesson.
 - **Failures:** every tool call becomes a story; sequence mistaken for causality; failures rewritten as foresight; draft publication blocks an otherwise complete deliverable; full archive broadcast as prompt.
 
-Managed tools own numbering, files, references, revision and publication. Models supply claims, research content and evidence rather than maintaining generated documents. Skill-only use follows [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md) in its isolated records area.
+The records procedure in [`SKILL.md`](SKILL.md#records-on-this-path) owns numbering, files, references, revision, and publication. Models supply claims, research content, and evidence rather than maintaining generated documents. The reflection questions themselves live in [`EVOLUTION-TEMPLATE.md`](EVOLUTION-TEMPLATE.md).
 
 ## Deliver and synthesize
 
@@ -383,4 +383,3 @@ Classify what changed and redirect minimally:
 - useful non-blocking issue appears → `Preserve and disposition findings`;
 - attempts repeat one assumption → one `Probe a shared assumption`;
 - evidence cannot decide a user-owned trade-off → `Ask the decision owner`.
-

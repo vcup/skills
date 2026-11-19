@@ -1,0 +1,20 @@
+{
+  "name": "@vcup/skills",
+  "version": "0.2.0",
+  "description": "OMP extension package: the ensemble skill, ensemble task roles, and the ensemble_state checkpoint tool.",
+  "exports": {
+    "./package.json": "./package.json",
+    "./omp-extension/index.ts": "./omp-extension/index.ts"
+  },
+  "files": [
+    "skills/",
+    "agents/",
+    "omp-extension/",
+    "README.md"
+  ],
+  "omp": {
+    "extensions": [
+      "./omp-extension/index.ts"
+    ]
+  }
+}

@@ -1,10 +1,13 @@
 # OMP Adapter
 
-Install online with:
+The isolated OMP package is built in the working tree and installed from its local staging directory. It is **not published to a registry and has no remote address**. Build it from the repository root, then install the local directory:
 
 ```bash
-omp install github:vcup/skills
+bun scripts/pack-omp.ts
+omp install ./build/pack/omp/staging
 ```
+
+OMP 17.2.15's installer accepts a local directory or a registry spec, but not a `.tgz` file, so the staging directory is the install target; the tarball from `npm pack` is an inspection artifact. The former mixed entry `omp install github:vcup/skills` is superseded and is not an unresolved remote install. These working-tree artifacts are not committed or published in this round; see the [P1 delivery record](../../docs/ensemble/P1-DELIVERY.md).
 
 OMP enables the plugin from its lockfile and discovers the package's `skills/` and `agents/` directories. No manual clone, local extension path, or separate skill install is required.
 
