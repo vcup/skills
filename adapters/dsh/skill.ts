@@ -11,7 +11,8 @@
  * packaged directory so the probe does not depend on the filesystem provider
  * scanning an extension root.
  *
- * It declares the rc.4 provider shapes structurally and imports nothing from
+ * It declares the provider shapes structurally (unchanged across the tested
+ * releases) and imports nothing from
  * `@deepseek-ai/*`, so the parsing and policy derivation are unit-tested in
  * this repository; `index.ts` passes the resulting object to
  * `ctx.skills.registerProvider`, which is where the real type check happens.

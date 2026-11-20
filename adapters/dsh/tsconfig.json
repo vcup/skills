@@ -1,5 +1,5 @@
 {
-  "//": "Repository-local type check for the DSH probe modules that do not import @deepseek-ai/*, plus scripts/pack-dsh*. index.ts and loader-check.ts are checked separately: adapters/dsh/typecheck-host.ts against an isolated rc.4 install.",
+  "//": "Repository-local type check for the DSH probe modules that do not import @deepseek-ai/*, plus scripts/pack-dsh*. index.ts and loader-check.ts are checked separately: adapters/dsh/typecheck-host.ts against an isolated install of a tested DSH release.",
   "//usage": "bunx tsc -p adapters/dsh/tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
@@ -13,5 +13,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun", "node"]
   },
-  "include": ["meta.ts", "reference.ts", "skill.ts", "typecheck-host.ts", "../../scripts/pack-dsh.ts", "../../scripts/pack-dsh.test.ts"]
+  "include": ["compatibility.ts", "compatibility.test.ts", "meta.ts", "reference.ts", "skill.ts", "typecheck-host.ts", "../../scripts/pack-dsh.ts", "../../scripts/pack-dsh.test.ts"]
 }

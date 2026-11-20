@@ -1,9 +1,9 @@
 /**
  * Execution-world isolation probes: real `confine` + `spawn` checks against the
- * fixed rc.4 `@deepseek-ai/dsh-sandbox-local` provider loaded from an install
- * directory (`INSTALL_DIR`). Every verdict below comes from actually spawning
- * the confined argv; nothing infers confinement from kernel ABI presence or
- * from types alone.
+ * `@deepseek-ai/dsh-sandbox-local` provider loaded from an install directory
+ * (`INSTALL_DIR`) of a tested DSH release. Every verdict below comes from
+ * actually spawning the confined argv; nothing infers confinement from kernel
+ * ABI presence or from types alone.
  *
  * Three-state honesty contract:
  * - `PASS`    — expected success observed after a real confined spawn.
@@ -22,16 +22,24 @@
 
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+
+import {
+  DSH_RELEASE_PACKAGES,
+  judgeProbeShadow,
+  judgeReleases,
+  supportedVersionsText,
+  type ReleaseReading,
+} from '../compatibility.ts';
 
 /** Expectation attached to a probe. */
 export type ProbeExpect = 'pass' | 'refused';
 /** Four-way verdict per probe. */
 export type Verdict = 'PASS' | 'REFUSED' | 'UNVERIFY' | 'FAIL';
 
-/** Minimal structural view of a confined wrap result (rc.4 `ConfinedArgv`). */
+/** Minimal structural view of a confined wrap result (`ConfinedArgv`). */
 export interface ConfinedResultLike {
   argv: string[];
   enforcement?: string;
@@ -211,6 +219,8 @@ export interface LoadedProvider {
   source: string;
   /** Declared package version of the loaded build (best effort). */
   version: string | null;
+  /** The DSH release the install provides; loading fails unless it is tested. */
+  release: string;
 }
 
 /**
@@ -245,7 +255,59 @@ export function resolveWithin(
   return { path: resolved };
 }
 
-/** Load the rc.4 local sandbox provider from an install dir; null on failure. */
+/**
+ * Read the DSH release an install provides.
+ *
+ * The sandbox provider build is not self-identifying in a way that proves the
+ * release, so the release is read from the packages the install actually
+ * contains and judged against the tested set. A mixed or unknown install is
+ * refused here rather than producing verdicts attributed to the wrong release.
+ */
+export function installRelease(
+  installDir: string,
+  resolver: (pkg: string) => string,
+): { release: string } | { error: string } {
+  const readings: ReleaseReading[] = DSH_RELEASE_PACKAGES.map((name) => {
+    try {
+      const manifest = resolver(`${name}/package.json`);
+      const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown };
+      return { package: name, version: typeof parsed.version === 'string' ? parsed.version : undefined };
+    } catch {
+      return { package: name, version: undefined };
+    }
+  });
+  const verdict = judgeReleases(readings, { require: DSH_RELEASE_PACKAGES });
+  if (!verdict.ok) {
+    return {
+      error: `install is not a tested DSH release (${supportedVersionsText()}): ${verdict.problems.join('; ')}`,
+    };
+  }
+
+  // A probe-private peer copy is the other half of the mixed shape: the host is
+  // consistent, but the plugin would load a different release than the host it
+  // runs in. Read it from the probe's own nested node_modules, if any.
+  const probeDir = join(installDir, 'node_modules', 'dsh-ensemble-probe', 'node_modules');
+  const shadow: ReleaseReading[] = existsSync(probeDir)
+    ? DSH_RELEASE_PACKAGES.flatMap((name) => {
+        const manifest = join(probeDir, name, 'package.json');
+        if (!existsSync(manifest)) return [];
+        try {
+          const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown };
+          const version = typeof parsed.version === 'string' ? parsed.version : undefined;
+          return [{ package: name, version }];
+        } catch {
+          return [];
+        }
+      })
+    : [];
+  const shadowVerdict = judgeProbeShadow(readings, shadow);
+  if (!shadowVerdict.ok) {
+    return { error: `mixed DSH install: ${shadowVerdict.problems.join('; ')}` };
+  }
+  return { release: readings[0]?.version ?? '' };
+}
+
+/** Load the local sandbox provider from an install dir; error on failure. */
 export function loadProvider(installDir: string): { provider: LoadedProvider } | { error: string } {
   try {
     if (!existsSync(installDir)) {
@@ -253,6 +315,11 @@ export function loadProvider(installDir: string): { provider: LoadedProvider } |
     }
     const rootReal = realpathSync(installDir);
     const requireFromInstall = createRequire(join(installDir, 'package.json'));
+    // Judge the release before resolving the provider. Otherwise an install of
+    // an untested release reports "provider not resolvable", which describes a
+    // missing file rather than the actual reason nothing may be verified.
+    const releaseResult = installRelease(installDir, (pkg) => requireFromInstall.resolve(pkg));
+    if ('error' in releaseResult) return releaseResult;
     const sandboxLocalResult = resolveWithin(rootReal, (pkg) => requireFromInstall.resolve(pkg), '@deepseek-ai/dsh-sandbox-local');
     if ('error' in sandboxLocalResult) return sandboxLocalResult;
     const cordisResult = resolveWithin(rootReal, (pkg) => requireFromInstall.resolve(pkg), '@deepseek-ai/cordis');
@@ -280,6 +347,7 @@ export function loadProvider(installDir: string): { provider: LoadedProvider } |
           provider.confine(argv, policy) as Promise<ConfinedResultLike>,
         source: sandboxLocalResult.path,
         version,
+        release: releaseResult.release,
       },
     };
   } catch (err) {
@@ -443,7 +511,7 @@ export function buildProbes(world: ProbeWorld): ProbeDef[] {
 export interface IsolationRunOptions {
   /** Inject for tests; defaults to node spawnSync. */
   spawn?: SpawnFn;
-  /** Inject for tests; defaults to the rc.4 provider loaded from installDir. */
+  /** Inject for tests; defaults to the provider loaded from installDir. */
   confine?: ConfineFn;
   /** Inject for tests; replaces the world-derived probe definitions. */
   probeDefs?: ProbeDef[];
@@ -468,7 +536,7 @@ function countVerdicts(results: ProbeResult[]): IsolationRunReport['counts'] {
 }
 
 const noInstallDirGuidance =
-  'provider-load (no INSTALL_DIR given; re-run with: make isolation-check INSTALL_DIR=<rc.4 install dir>)';
+  'provider-load (no INSTALL_DIR given; re-run with: make isolation-check INSTALL_DIR=<a tested DSH install dir>)';
 
 /** Static non-coverage declaration shared by every report shape. */
 const NOT_COVERED =
@@ -536,12 +604,13 @@ export async function runIsolationChecks(
   }
 
   const loaded = options.confine
-    ? ({ provider: { confine: options.confine, source: '(injected for tests)', version: null } } as { provider: LoadedProvider })
+    ? ({ provider: { confine: options.confine, source: '(injected for tests)', version: null, release: '(injected)' } } as { provider: LoadedProvider })
     : loadProvider(installDir);
   if ('error' in loaded) {
     const report = configErrorReport(loaded.error, installDir);
     return finalizeObserve({ lines: [...lines, ...report.lines], exitCode: report.exitCode, counts: report.counts, envScope: report.envScope }, options.observe === true);
   }
+  lines.push(`install: DSH ${loaded.provider.release} (tested releases: ${supportedVersionsText()})`);
   lines.push(
     `provider: @deepseek-ai/dsh-sandbox-local${loaded.provider.version ? `@${loaded.provider.version}` : ''} ` +
     `from ${loaded.provider.source} (resolved within INSTALL_DIR, verified by realpath prefix check)`,

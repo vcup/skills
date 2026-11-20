@@ -31,10 +31,30 @@ import { rm } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEFAULT_DSH_VERSION,
+  DSH_RUNTIME_PACKAGE,
+  judgeReleases,
+  supportedVersionsText,
+  type ReleaseReading,
+} from "../adapters/dsh/compatibility.ts";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The DSH release the Host gates are pinned to. */
-const EXPECTED_DSH = "0.2.2-rc.4";
+/**
+ * Packages whose versions are judged for one install.
+ *
+ * All three are read so a mixed install (for example a probe-private `rc.4`
+ * copy beside an `rc.5` host) is caught, but only `dsh-skill` must be present:
+ * it is the package the Host gates load, and `@deepseek-ai/dsh` pulls it in, so
+ * its absence is what actually distinguishes "not an install" from "an install".
+ */
+const JUDGED_DSH_PACKAGES = [
+  DSH_RUNTIME_PACKAGE,
+  "@deepseek-ai/dsh-skill",
+  "@deepseek-ai/dsh-tools",
+] as const;
+const REQUIRED_DSH_PACKAGE = "@deepseek-ai/dsh-skill";
 
 /** Generated directories this repository owns. `clean` deletes nothing else. */
 const GENERATED_DIR = "build";
@@ -192,7 +212,8 @@ export function doctor(root: string = REPO_ROOT, probe: Probe = defaultProbe): D
 
   lines.push("== doctor: DSH Host gates");
   lines.push(
-    "  host-check and typecheck-host need an existing isolated rc.4 install; pass INSTALL_DIR=<dir>.",
+    `  host-check and typecheck-host need an existing isolated DSH install of a tested release` +
+      ` (${supportedVersionsText()}); pass INSTALL_DIR=<dir>.`,
   );
   lines.push("  profile boot and execution-world isolation are not verified by this repository yet.");
 
@@ -273,12 +294,30 @@ export function inspectArtifacts(
 export interface InstallDirReport {
   readonly ok: boolean;
   readonly problems: readonly string[];
+  /** The release the install reports, when all required packages agree on one. */
+  readonly release?: string;
+}
+
+/** Read one installed package's version; undefined when absent or unreadable. */
+function installedVersion(modules: string, name: string): string | undefined {
+  const manifestPath = join(modules, name, "package.json");
+  if (!existsSync(manifestPath)) return undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" && manifest.version !== "" ? manifest.version : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Check that a directory really is an isolated DSH install for the pinned
+ * Check that a directory really is an isolated DSH install of a *tested*
  * release. The gates themselves re-check this; failing here just fails earlier
  * and with a better message.
+ *
+ * The accepted releases come from `adapters/dsh/compatibility.ts`. A missing
+ * package, an unknown or future release, and two packages reporting different
+ * releases (a mixed install) are all refused rather than measured.
  *
  * `requireTypes` is off for the Loader gate, which needs the published runtime
  * packages but not `tsc`; the type gate needs both.
@@ -293,22 +332,26 @@ export function validateInstallDir(path: string, options: { requireTypes?: boole
     return { ok: false, problems: [`INSTALL_DIR is not a directory: ${resolved}`] };
   }
   const modules = join(resolved, "node_modules");
-  const manifestPath = join(modules, "@deepseek-ai/dsh-skill/package.json");
-  if (!existsSync(manifestPath)) {
+  const readings: ReleaseReading[] = JUDGED_DSH_PACKAGES.map((name) => ({
+    package: name,
+    version: installedVersion(modules, name),
+  }));
+
+  if (readings.every((reading) => reading.version === undefined)) {
     problems.push(
-      `no @deepseek-ai/dsh-skill in ${modules}\n` +
-        "  This must be a separate install of the published rc.4 packages, not this working tree.\n" +
+      `no ${REQUIRED_DSH_PACKAGE} in ${modules}\n` +
+        `  This must be a separate install of the published DSH packages (tested: ${supportedVersionsText()}),\n` +
+        "  not this working tree.\n" +
         "  Any writable directory outside the repository works; create one with:\n" +
-        '    dsh_install="${TMPDIR:-/tmp}/dsh-rc4"\n' +
+        '    dsh_install="${TMPDIR:-/tmp}/dsh-probe"\n' +
         '    mkdir -p "$dsh_install" && cd "$dsh_install" && npm init -y\n' +
-        `    npm install --ignore-scripts @deepseek-ai/dsh@${EXPECTED_DSH} typescript@5.9 @types/node@24`,
+        `    npm install --ignore-scripts @deepseek-ai/dsh@${DEFAULT_DSH_VERSION} typescript@5.9 @types/node@24`,
     );
   } else {
-    const manifest = JSON.parse(readFileText(manifestPath)) as { version?: string };
-    if (manifest.version !== EXPECTED_DSH) {
-      problems.push(`@deepseek-ai/dsh-skill is ${manifest.version ?? "(unknown)"}, expected ${EXPECTED_DSH}`);
-    }
+    const verdict = judgeReleases(readings, { require: [REQUIRED_DSH_PACKAGE] });
+    problems.push(...verdict.problems);
   }
+
   if (options.requireTypes === true) {
     for (const [label, rel] of [
       ["typescript", "typescript/bin/tsc"],
@@ -317,11 +360,9 @@ export function validateInstallDir(path: string, options: { requireTypes?: boole
       if (!existsSync(join(modules, rel))) problems.push(`no ${label} in ${modules}; install it in the isolated directory`);
     }
   }
-  return { ok: problems.length === 0, problems };
-}
-
-function readFileText(path: string): string {
-  return readFileSync(path, "utf8");
+  const releases = new Set(readings.map((reading) => reading.version).filter((v): v is string => v !== undefined));
+  const release = releases.size === 1 ? [...releases][0] : undefined;
+  return { ok: problems.length === 0, problems, ...(release === undefined ? {} : { release }) };
 }
 
 export interface CleanPlan {
@@ -426,7 +467,7 @@ if (import.meta.main) {
       if (path === undefined || path === "") fail("usage: project-tasks.ts install-dir [--types] [--quiet] <dir>", 2);
       const report = validateInstallDir(path, { requireTypes });
       if (!report.ok) fail(report.problems.map((problem) => `error: ${problem}`).join("\n"), 2);
-      if (!quiet) console.log(`ok      isolated DSH install: ${resolve(path)} (${EXPECTED_DSH})`);
+      if (!quiet) console.log(`ok      isolated DSH install: ${resolve(path)} (${report.release ?? DEFAULT_DSH_VERSION})`);
       break;
     }
     case "clean": {

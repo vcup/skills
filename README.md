@@ -71,16 +71,22 @@ remove it through OMP's plugin manager. See the [OMP guide](adapters/omp/README.
 
 ### DeepSeek Harness
 
-The DSH package is the **Host-only probe** `dsh-ensemble-probe@0.1.0`, built
-against DSH `0.2.2-rc.4`. It registers the `ensemble` skill as user-invocable and
+The DSH package is the **Host-only probe** `dsh-ensemble-probe@0.1.1`, built and
+tested against DSH `0.2.2-rc.4` and `0.2.2-rc.5`; `0.2.2-rc.5` is the default
+for a fresh install. It registers the `ensemble` skill as user-invocable and
 one read-only `ensemble_reference` tool. It is not the full ensemble product:
 domain tools, external archive, Client/GUI, and Host/execution-world separation
 are not implemented. Startup output, the isolated-first-run recipe, and the
 evidence behind these claims are in the [DSH adapter guide](adapters/dsh/README.md).
 
-**Prerequisites.** This package requires DSH `0.2.2-rc.4`; **rc.5 is not
-supported**. `engines.dsh` is pinned to that exact release, so an install against
-any other version is rejected rather than attempted.
+**Prerequisites.** This package supports exactly DSH `0.2.2-rc.4` and
+`0.2.2-rc.5`; `engines.dsh = "0.2.2-rc.4 || 0.2.2-rc.5"` and the
+`dsh-skill`/`dsh-tools` peers use the same disjunction so pnpm dedupes to the
+host copy (`@deepseek-ai/cordis` stays `~4.1.0`). The set is an explicit
+enumeration, not a floating range or `latest` follow: an unsupported or future
+release is rejected until it is tested and added on purpose. Registry
+dist-tags are observations, not a support contract — see [Version support and
+upgrade](docs/UPGRADING.md).
 
 `dsh plugin` forwards to **pnpm**, so pnpm must be on `PATH`
 (otherwise `add` fails with `pnpm was not found`, exit 127). Keep `PNPM_HOME`
@@ -92,8 +98,8 @@ From this repository, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.0
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.1
 dsh --profile web                                    # start DSH
 ```
 
@@ -113,7 +119,7 @@ from the directory that holds it, with a path relative to that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
 ```
 
 Two messages from `add` are **not** failures: `Agent skills awaiting approval: …`
@@ -145,7 +151,7 @@ other name, path, or symbolic link.
 - [Edit commit message](skills/edit-commit-msg/SKILL.md): crafts Git's pending message without changing history or workflow state.
 - [Scout](agents/ensemble-scout.md), [reviewer](agents/ensemble-reviewer.md), and [worker](agents/ensemble-worker.md): OMP-native assignment roles.
 - [OMP adapter](adapters/omp/index.ts): the path-safe `ensemble_state` tool.
-- [DSH adapter](adapters/dsh/README.md): the Host-only rc.4 probe and its evidence.
+- [DSH adapter](adapters/dsh/README.md): the Host-only rc.4/rc.5 probe and its evidence.
 - [DSH design](docs/ensemble/README.md): the managed adapter design and its [delivery roadmap](ROADMAP.md).
 
 ## Where to read next

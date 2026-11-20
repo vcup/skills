@@ -38,8 +38,20 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** The DSH release this gate is pinned to. */
-export const EXPECTED_DSH = "0.2.2-rc.4";
+import {
+  DEFAULT_DSH_VERSION,
+  isSupportedDshVersion,
+  supportedVersionsText,
+} from "../adapters/dsh/compatibility.ts";
+
+/**
+ * The release a fresh install uses by default.
+ *
+ * The gate itself measures any release in the supported set, not only this
+ * one: the matrix is about profile boot behaviour, a property of the
+ * composition, so measuring it once per tested release is the point.
+ */
+export const EXPECTED_DSH = DEFAULT_DSH_VERSION;
 
 /** Wall-clock limit for a profile that must print help and exit. */
 export const HELP_TIMEOUT_MS = 60_000;
@@ -157,8 +169,8 @@ export interface ProfileReport {
 }
 
 const GUIDANCE: readonly string[] = [
-  "Create an isolated install of the published release (never this working tree):",
-  '  dsh_install="${TMPDIR:-/tmp}/dsh-rc4"',
+  `Create an isolated install of a tested release (${supportedVersionsText()}; never this working tree):`,
+  '  dsh_install="${TMPDIR:-/tmp}/dsh-probe"',
   '  mkdir -p "$dsh_install" && cd "$dsh_install" && npm init -y',
   `  npm install --ignore-scripts @deepseek-ai/dsh@${EXPECTED_DSH} typescript@5.9 @types/node@24`,
   'Then: make profile-check INSTALL_DIR="$dsh_install"',
@@ -383,7 +395,10 @@ export function runProfileCheck(
   }
 
   const dshVersion = installedVersion(installDir, inspector);
-  if (dshVersion !== EXPECTED_DSH) {
+  // Every tested release is measured, so a green run means the matrix held for
+  // that release. An unknown or future one is refused: this gate has no result
+  // to report about a release nothing here exercised.
+  if (!isSupportedDshVersion(dshVersion)) {
     return {
       verdict: "unverified",
       installDir,
@@ -393,7 +408,7 @@ export function runProfileCheck(
       blockedBecause:
         dshVersion === undefined
           ? "the install's DSH manifest has no readable version"
-          : `the install holds ${dshVersion}, but this gate measures ${EXPECTED_DSH}`,
+          : `the install holds ${dshVersion}, which is outside the tested set (${supportedVersionsText()})`,
       guidance,
     };
   }
@@ -457,7 +472,8 @@ export function formatReport(report: ProfileReport): string[] {
     `coverage: ${report.outcomes.length}/${report.planned} profile shapes measured` +
       (report.dshVersion === undefined ? "" : ` against ${report.dshVersion}`) +
       ` in this container`,
-    "not covered: live profile, Host/execution-world isolation, Client/GUI, rc.5 type gate (pinned to rc.4)",
+    `not covered: live profile, Host/execution-world isolation, Client/GUI; ` +
+      `tested releases only (${supportedVersionsText()}), never an untested one`,
   ];
   if (report.installDir !== undefined) {
     lines.push(`install: ${report.installDir}${report.dshVersion === undefined ? "" : ` (${report.dshVersion})`}`);

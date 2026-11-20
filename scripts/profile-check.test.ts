@@ -20,6 +20,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_DSH_VERSION,
+  SUPPORTED_DSH_VERSIONS,
+} from "../adapters/dsh/compatibility.ts";
+import {
   EXPECTED_DSH,
   OBSERVE_BANNER,
   cliPath,
@@ -165,16 +169,36 @@ describe("runProfileCheck: verdicts without a real install", () => {
     expect(report.blockedBecause).toContain("no published DSH CLI");
   });
 
-  test("a different release is refused instead of measured as this one", async () => {
+  test("every tested release is measured, not only the default one", async () => {
+    for (const version of SUPPORTED_DSH_VERSIONS) {
+      const root = await temporaryRoot();
+      const report = runProfileCheck({
+        installDir: root,
+        inspector: fakeInstall(root, { version }),
+        node: "/usr/bin/node",
+        runner: scriptedRunner([
+          { status: 0, stdout: "Usage: x\n", stderr: "", timedOut: false },
+          { status: null, stdout: "", stderr: "", timedOut: true },
+        ]).runner,
+        probes: [HELP_PROBE, WAIT_PROBE],
+      });
+      // Measured, not refused: the matrix ran and reported against this release.
+      expect(report.verdict).toBe("pass");
+      expect(report.dshVersion).toBe(version);
+      expect(report.outcomes).toHaveLength(2);
+    }
+  });
+
+  test("an untested release is refused instead of measured as a supported one", async () => {
     const root = await temporaryRoot();
     const report = runProfileCheck({
       installDir: root,
-      inspector: fakeInstall(root, { version: "0.2.2-rc.5" }),
+      inspector: fakeInstall(root, { version: "0.2.2-rc.6" }),
       path: "/usr/bin",
     });
     expect(report.verdict).toBe("unverified");
-    expect(report.blockedBecause).toContain("0.2.2-rc.5");
-    expect(report.blockedBecause).toContain(EXPECTED_DSH);
+    expect(report.blockedBecause).toContain("0.2.2-rc.6");
+    expect(report.blockedBecause).toContain("outside the tested set");
     expect(report.outcomes).toHaveLength(0);
   });
 
@@ -368,8 +392,11 @@ describe("coverage lines", () => {
       probes: [HELP_PROBE, WAIT_PROBE],
     });
     const text = formatReport(report).join("\n");
-    expect(text).toContain("coverage: 2/2 profile shapes measured against 0.2.2-rc.4");
-    expect(text).toContain("not covered: live profile, Host/execution-world isolation, Client/GUI, rc.5 type gate");
+    expect(text).toContain("coverage: 2/2 profile shapes measured against 0.2.2-rc.5");
+    expect(text).toContain("not covered: live profile, Host/execution-world isolation, Client/GUI");
+    // The coverage line names the tested set, so a reader cannot read the
+    // result as covering a release that was never run.
+    expect(text).toContain(SUPPORTED_DSH_VERSIONS.join(" or "));
   });
 
   test("an unverified run reports 0 measured and still lists the gaps", () => {
@@ -462,6 +489,9 @@ describe("real matrix", () => {
   );
 });
 
-test("the pinned release is recorded in one place", () => {
-  expect(EXPECTED_DSH).toBe("0.2.2-rc.4");
+test("the gate's default release comes from the one support-set module", () => {
+  expect(EXPECTED_DSH).toBe(DEFAULT_DSH_VERSION);
+  // Both tested releases are accepted; the default is one of them.
+  expect(SUPPORTED_DSH_VERSIONS).toContain(DEFAULT_DSH_VERSION);
+  expect(SUPPORTED_DSH_VERSIONS.length).toBeGreaterThan(1);
 });

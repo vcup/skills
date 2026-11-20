@@ -22,7 +22,12 @@ import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promi
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_DSH_VERSION,
   ENGINES_DSH,
+  SUPPORTED_DSH_VERSIONS,
+  supportedVersionsText,
+} from "../adapters/dsh/compatibility.ts";
+import {
   PEER_DEPENDENCIES,
   PROBE_PACKAGE_NAME,
   PROBE_VERSION,
@@ -106,7 +111,8 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     version: PROBE_VERSION,
     private: true,
     description:
-      "Host-only DSH probe: user-invocable ensemble skill plus a fixed-enumeration reference reader. Not the ensemble product.",
+      "Host-only DSH probe: user-invocable ensemble skill plus a fixed-enumeration reference reader. " +
+      `Tested against DSH ${supportedVersionsText()}. Not the ensemble product.`,
     type: "module",
     main: "index.js",
     files: ["index.js", "cordis.patch.yml", "bundle-manifest.json", "README.md", `${SKILL_DIR}/`],
@@ -117,6 +123,8 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     probe: {
       status: "host-only-probe",
       skill: SKILL_FILE,
+      supportedDsh: [...SUPPORTED_DSH_VERSIONS],
+      defaultDsh: DEFAULT_DSH_VERSION,
       references: contentFiles.map((file) => ({ path: file.path, sha256: file.sha256, bytes: file.bytes })),
     },
   };
@@ -218,6 +226,11 @@ export async function stage(
     package: PROBE_PACKAGE_NAME,
     version: PROBE_VERSION,
     engines: { dsh: ENGINES_DSH },
+    // The tested set is recorded in the artifact so an installed package can be
+    // audited without reading this repository: `engines.dsh` alone does not say
+    // which releases were exercised, only which are permitted.
+    supportedDsh: [...SUPPORTED_DSH_VERSIONS],
+    defaultDsh: DEFAULT_DSH_VERSION,
     contentDigest,
     files: content.map(({ path, sha256, bytes }) => ({ path, sha256, bytes })),
   };

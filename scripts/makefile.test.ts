@@ -24,6 +24,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { PROBE_VERSION } from "../adapters/dsh/meta.ts";
+import { DEFAULT_DSH_VERSION, SUPPORTED_DSH_VERSIONS } from "../adapters/dsh/compatibility.ts";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
@@ -338,7 +341,9 @@ describe("Host gates", () => {
     const { code, all } = await make(["typecheck-host"]);
     expect(code).toBe(2);
     expect(all).toContain("INSTALL_DIR is not set");
-    expect(all).toContain("isolated DSH rc.4 install");
+    expect(all).toContain("isolated DSH install");
+    // The supported set is enumerated, not a single release: rc.4 and rc.5.
+    for (const version of SUPPORTED_DSH_VERSIONS) expect(all).toContain(version);
     expect(all).toContain("0.2.2-rc.4");
   });
 
@@ -406,7 +411,7 @@ describe("loader-check declares ESM in its scratch directory", () => {
       await mkdir(join(install, "node_modules/dsh-ensemble-probe"), { recursive: true });
       await writeFile(
         join(install, "node_modules/dsh-ensemble-probe/package.json"),
-        `${JSON.stringify({ name: "dsh-ensemble-probe", version: "0.1.0" })}\n`,
+        `${JSON.stringify({ name: "dsh-ensemble-probe", version: PROBE_VERSION })}\n`,
       );
     }
     return install;
@@ -470,7 +475,7 @@ describe("loader-check declares ESM in its scratch directory", () => {
     // A first-time reader gets the whole sequence, not just the rc.4 packages.
     const { code, all } = await make(["loader-check"]);
     expect(code).toBe(2);
-    expect(all).toContain("0.2.2-rc.4");
+    expect(all).toContain(`@deepseek-ai/dsh@${DEFAULT_DSH_VERSION}`);
     expect(all).toContain("make pack-dsh");
     expect(all).toContain("dsh-ensemble-probe");
   });
@@ -487,10 +492,10 @@ describe("loader-check declares ESM in its scratch directory", () => {
     }
   });
 
-  test("host-check passes against a real isolated rc.4 install", async () => {
+  test("host-check passes against a real isolated install of a tested release", async () => {
     const installDir = process.env.MAKE_TEST_INSTALL_DIR;
     if (installDir === undefined || installDir === "") {
-      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated install of a tested release> to run the positive path");
       return;
     }
     const { code, all } = await make(["loader-check", `INSTALL_DIR=${installDir}`]);
@@ -528,7 +533,7 @@ describe("gates fail closed; diagnose observes", () => {
   test("isolation-check against a usable install runs every probe", async () => {
     const installDir = process.env.MAKE_TEST_INSTALL_DIR;
     if (installDir === undefined || installDir === "") {
-      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated install of a tested release> to run the positive path");
       return;
     }
     const { code, all } = await make(["isolation-check", `INSTALL_DIR=${installDir}`]);
@@ -555,7 +560,7 @@ describe("gates fail closed; diagnose observes", () => {
   test("profile-check against a usable install boots profiles and reports PASS", async () => {
     const installDir = process.env.MAKE_TEST_INSTALL_DIR;
     if (installDir === undefined || installDir === "") {
-      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive path");
+      console.log("skip: set MAKE_TEST_INSTALL_DIR=<isolated install of a tested release> to run the positive path");
       return;
     }
     const { code, all } = await make(["profile-check", `INSTALL_DIR=${installDir}`]);
@@ -662,7 +667,7 @@ describe("release doors", () => {
     expect(all).toContain("pass");
     expect(all).toContain("package-check: ok (offline; Host gates not included)");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, "build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz"))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
   }, 120_000);
@@ -672,7 +677,9 @@ describe("release doors", () => {
     expect(code).toBe(2);
     // Not a skip, not a pass: the strict door refuses.
     expect(all).toContain("INSTALL_DIR is not set");
-    expect(all).toContain("isolated DSH rc.4 install");
+    expect(all).toContain("isolated DSH install");
+    // The supported set is enumerated, not a single release: rc.4 and rc.5.
+    for (const version of SUPPORTED_DSH_VERSIONS) expect(all).toContain(version);
     // And it says what is missing, in verification terms.
     expect(all).toContain("Any writable directory outside the repository works");
   });
@@ -741,7 +748,7 @@ describe("portable wording", () => {
     const { code, all } = await make(["typecheck-host"]);
     expect(code).toBe(2);
     expect(all).toContain("Any writable directory outside the repository works");
-    expect(all).toContain("${TMPDIR:-/tmp}/dsh-rc4");
+    expect(all).toContain("${TMPDIR:-/tmp}/dsh-install");
   });
 });
 
@@ -835,7 +842,7 @@ describe("parallel safety", () => {
     expect(code).toBe(0);
     expect(all).not.toContain("Error");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, "build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz"))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
   }, 60_000);
@@ -845,7 +852,7 @@ describe("parallel safety", () => {
     expect(code).toBe(0);
     expect(all).toContain("check: ok");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, "build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz"))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
   }, 120_000);

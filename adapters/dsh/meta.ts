@@ -6,34 +6,53 @@
  * resource and budget without a DSH installation present. `index.ts` is the
  * only file in this directory that imports `@deepseek-ai/*`.
  *
+ * Which DSH releases are supported is *not* declared here: it lives in
+ * `./compatibility.ts`, which every gate and the package manifest read. This
+ * module re-exports the manifest-facing values so there is exactly one source
+ * and no second list to keep in step.
+ *
  * @module adapters/dsh/meta
  */
+
+import { DSH_PEER_RANGE, ENGINES_DSH, SHARED_INSTANCE_PACKAGE } from "./compatibility.ts";
 
 /** Package name of the installable probe bundle. */
 export const PROBE_PACKAGE_NAME = "dsh-ensemble-probe";
 
-/** Probe version. Independent of the ensemble content version. */
-export const PROBE_VERSION = "0.1.0";
+/**
+ * Probe version. Independent of the ensemble content version.
+ *
+ * 0.1.1 exists because 0.1.0 supported only `0.2.2-rc.4`. A same-version
+ * rebuild cannot be distinguished by `dsh plugin list` or an upgrade check, so
+ * the support change ships under a new version.
+ */
+export const PROBE_VERSION = "0.1.1";
 
 /**
- * The only DSH release this probe was built and exercised against.
- * IMPLEMENTATION.md §4 requires the first slice to lock `0.2.2-rc.4`; a
- * floating range would claim coverage no run supports.
+ * The `engines.dsh` range written into the package manifest: the tested set as
+ * a semver disjunction of exact versions, so a future release is refused
+ * instead of silently admitted.
  */
-export const ENGINES_DSH = "0.2.2-rc.4";
-
-/** Shared-instance DSH packages the probe imports; must match the host's copies. */
-export const PEER_DEPENDENCIES: Readonly<Record<string, string>> = {
-  "@deepseek-ai/cordis": "~4.1.0",
-  "@deepseek-ai/dsh-skill": "0.2.2-rc.4",
-  "@deepseek-ai/dsh-tools": "0.2.2-rc.4",
-};
+export { ENGINES_DSH };
 
 /** Registered skill name. Matches the content build's frontmatter `name`. */
 export const SKILL_NAME = "ensemble";
 
 /** Skill provider name registered in `ctx.skills`. */
 export const PROVIDER_NAME = "ensemble-probe";
+
+/**
+ * Shared-instance DSH packages the probe imports; must match the host's copies.
+ *
+ * The two DSH packages carry the same disjunction as `engines.dsh` so pnpm
+ * dedupes to the host's copy rather than installing a private one; `cordis` is
+ * a separate shared instance whose range does not move with the DSH release.
+ */
+export const PEER_DEPENDENCIES: Readonly<Record<string, string>> = {
+  [SHARED_INSTANCE_PACKAGE]: "~4.1.0",
+  "@deepseek-ai/dsh-skill": DSH_PEER_RANGE,
+  "@deepseek-ai/dsh-tools": DSH_PEER_RANGE,
+};
 
 /** Bundled skill directory, relative to the installed package root. */
 export const SKILL_DIR = "skills/ensemble";
@@ -44,11 +63,12 @@ export const SKILL_FILE = "SKILL.md";
 /**
  * Precedence rank for a packaged skill provider.
  *
- * Source: rc.4 `@deepseek-ai/dsh-skill`, `BUNDLED_SKILL_RANK = 600`
+ * Source: `@deepseek-ai/dsh-skill`, `BUNDLED_SKILL_RANK = 600`
  * (`packages/skill/skill/src/index.ts` line 28), documented as the standard
- * rank for packaged providers and local bundled roots. A project-local source
- * (rank 100 in `dsh-skill-filesystem`) therefore outranks this bundle, and the
- * registry keeps one winning definition per name instead of merging bodies.
+ * rank for packaged providers and local bundled roots. The value is unchanged
+ * across the supported releases. A project-local source (rank 100 in
+ * `dsh-skill-filesystem`) therefore outranks this bundle, and the registry
+ * keeps one winning definition per name instead of merging bodies.
  */
 export const SKILL_RANK = 600;
 

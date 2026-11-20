@@ -1,17 +1,24 @@
 # DSH Adapter — Host-only P1 probe
 
-A bounded probe for the DeepSeek Harness `0.2.2-rc.4` (pinned source
-`3f321d32bfe382212a8ed8785c1d47a5a300aa23`). It exists to answer one P1
-question with real evidence: **can the published Loader load a package that
-registers the `ensemble` skill and one read-only reference tool, with no source
-checkout present?**
+A bounded probe for DeepSeek Harness `0.2.2-rc.4` and `0.2.2-rc.5`; `0.2.2-rc.5`
+is the default for new installs. The original rc.4 source baseline
+(`3f321d32bfe382212a8ed8785c1d47a5a300aa23`) remains the pinned design source
+for the DSH seam; it is not a claim that rc.5 is unsupported. It exists to answer
+one P1 question with real evidence: **can the published Loader load a package
+that registers the `ensemble` skill and one read-only reference tool, with no
+source checkout present?**
 
 It answers that question and nothing else. See [What this is
 not](#what-this-is-not).
 
-**Supported range:** DSH `0.2.2-rc.4` only. `engines.dsh` is pinned to that
-exact release, so an install against another version — rc.5 included — is
-rejected rather than attempted.
+**Supported set:** exactly DSH `0.2.2-rc.4` and `0.2.2-rc.5`, with `0.2.2-rc.5`
+the default. `engines.dsh = "0.2.2-rc.4 || 0.2.2-rc.5"` and the
+`dsh-skill`/`dsh-tools` peers use the same disjunction so pnpm dedupes to the
+host copy (`@deepseek-ai/cordis` remains `~4.1.0`). The set is an explicit
+enumeration: DSH judges an own `engines.dsh` with `includePrerelease`, so
+open ranges such as `>=0.2.2-rc.4` or `^0.2.2-rc.4` would admit future
+prereleases nobody tested. An unknown or future release is refused until it is
+verified and added on purpose. See [Version support and upgrade](../../docs/UPGRADING.md).
 
 ## Files
 
@@ -29,7 +36,7 @@ rejected rather than attempted.
 
 ## Package
 
-`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz`
+`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz`
 (git-ignored). The bundled skill text comes from the in-memory
 `build('dsh')` result of `scripts/build-ensemble.ts`; the ignored default
 staging directory is never read, so a stale checkout cannot enter a package.
@@ -78,8 +85,8 @@ From the repository root, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.0
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.1
 dsh --profile web                                    # start DSH
 ```
 
@@ -89,7 +96,7 @@ that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
 ```
 
 `add` prints two lines that are **not** failures — `Agent skills awaiting
@@ -106,7 +113,7 @@ scratch="$(mktemp -d)"
 export DSH_HOME="$scratch/home" npm_config_cache="$scratch/npm-cache" PNPM_HOME="$scratch/pnpm"
 export PATH="<your-rc4-install>/node_modules/.bin:$PATH"   # provides the dsh CLI
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
 dsh --profile web
 ```
 
@@ -137,8 +144,11 @@ already in the roster can linger until a later or fresh session; restart to be
 sure both are gone.
 
 The `update` verb exists and runs (`dsh plugin --profile web update` reports
-`Already up to date`), but it has never been exercised against a newer build
-because none exists yet. Recommend add, list, boot, and remove only.
+`Already up to date` on an unchanged install). The 0.1.0 → 0.1.1 in-place
+upgrade was observed on an rc.4 host with the real CLI: adding 0.1.1 to the same
+profile replaced 0.1.0 (pnpm printed `- 0.1.0` / `+ 0.1.1`), `plugin list` and
+the on-disk manifest showed 0.1.1 with the explicit rc.4/rc.5 set, and no
+private peer copies remained. See [Version support and upgrade](../../docs/UPGRADING.md).
 
 Two checks need an installation that resolves `@deepseek-ai/*`; neither is part
 of the full test or repository typecheck. Pass an already prepared isolated
@@ -169,8 +179,11 @@ type-checks `index.ts` or `loader-check.ts` without such an install.
 
 ## What was run, and where it stops
 
-Observed in a container-only isolated install (published rc.4 packages plus this
-tarball, with an isolated home):
+Historical P1 baseline observation in a container-only isolated install
+(published rc.4 packages plus the then-current 0.1.0 probe tarball, with an
+isolated home). The version and support strings in this table are what was
+measured then; current install commands above use 0.1.1 and the explicit
+rc.4/rc.5 set.
 
 | Command | Result |
 |---|---|

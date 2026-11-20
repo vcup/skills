@@ -1,8 +1,9 @@
 # dsh-ensemble-probe
 
-A **Host-only probe** for the DeepSeek Harness `0.2.2-rc.4`. It proves that the
-published Loader can load one package that (a) registers the `ensemble` skill as
-a user-invocable skill and (b) exposes one read-only tool over a fixed list of
+A **Host-only probe** for DeepSeek Harness `0.2.2-rc.4` and `0.2.2-rc.5`
+(`0.2.2-rc.5` is the default for new installs). It proves that the published
+Loader can load one package that (a) registers the `ensemble` skill as a
+user-invocable skill and (b) exposes one read-only tool over a fixed list of
 reference files bundled in the package.
 
 This package is not the ensemble product. It carries the method text and a
@@ -19,14 +20,16 @@ Add the package to a profile that has an app row. `web` is the shipped profile
 and is the safe choice:
 
 ```bash
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
-dsh plugin --profile web list      # shows dsh-ensemble-probe@0.1.0
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web list      # shows dsh-ensemble-probe@0.1.1
 dsh --profile web
 ```
 
 The bundle declares `dsh.bundle.patch`, so `dsh plugin add` appends it to the
 profile's bundle list. It requires a host that provides the `skills` and `tools`
-services (`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-tools`) at `0.2.2-rc.4`.
+services (`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-tools`) at exactly
+`0.2.2-rc.4` or `0.2.2-rc.5`; any other release is refused until it is tested
+and explicitly added. `@deepseek-ai/cordis` remains at `~4.1.0`.
 
 Do **not** point `--profile` at a custom composition with no app/startup row:
 such a profile boots and then keeps running without printing help, which looks
@@ -94,6 +97,8 @@ catalog immediately, but a tool already in the roster can linger until a later
 or fresh session. Restart DSH if you need both gone at once.
 
 The `update` verb exists and runs (`dsh plugin --profile web update` reports
-`Already up to date`), but it has never been exercised against a newer build
-because none exists yet. This package therefore recommends add, list, boot, and
-remove only.
+`Already up to date` on an unchanged install). The 0.1.0 → 0.1.1 in-place
+upgrade was observed with the real CLI: adding 0.1.1 to the same profile
+replaced 0.1.0 (pnpm printed `- 0.1.0` / `+ 0.1.1`), and `plugin list` plus the
+on-disk manifest showed 0.1.1 with the explicit rc.4/rc.5 set and no private
+peer copies.

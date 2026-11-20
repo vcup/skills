@@ -1,5 +1,8 @@
 /**
- * DSH ensemble probe — a Host-only P1 technical probe for DSH `0.2.2-rc.4`.
+ * DSH ensemble probe — a Host-only P1 technical probe.
+ *
+ * Supported DSH releases are declared once, in `./compatibility.ts`; the
+ * package manifest's `engines.dsh` and every gate read that module.
  *
  * What this plugin does, and all it does:
  *

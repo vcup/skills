@@ -57,7 +57,7 @@ OMP的[技能发现实现](https://unpkg.com/@oh-my-pi/pi-coding-agent@17.2.15/s
 
 OMP与DSH分别从干净staging root打包；每个root拥有自己的package manifest、README、exports和文件白名单。OMP包只声明OMP入口；DSH包只声明DSH Host/Client与资源。DSH不依赖OMP包，也不从它读取技能正文；两包都不依赖运行时下载通用方法。
 
-OMP可保留现有`@vcup/skills`包身份及其它既有技能的交付，DSH使用另一个包身份（`dsh-ensemble-probe`）。插件包的发布地址在发布配置中指定；当前两个包都只在工作树生成，未发布、没有远端地址。各路径安装页只给自己的精确命令，删除旧混合入口。纯skill的Git安装地址保持`vcup/skills`。母仓库的多路径README不进入安装后的技能目录或插件包；npm会自动包含的README/package元数据在各自staging root生成，不能只靠根包`files`排除。
+当前 DSH 支持集合、默认版本与升级流程见[版本支持与升级](../UPGRADING.md)；以下各路径约定不因支持集合扩大而改写。OMP可保留现有`@vcup/skills`包身份及其它既有技能的交付，DSH使用另一个包身份（`dsh-ensemble-probe`）。插件包的发布地址在发布配置中指定；当前两个包都只在工作树生成，未发布、没有远端地址。各路径安装页只给自己的精确命令，删除旧混合入口。纯skill的Git安装地址保持`vcup/skills`。母仓库的多路径README不进入安装后的技能目录或插件包；npm会自动包含的README/package元数据在各自staging root生成，不能只靠根包`files`排除。
 
 OMP 隔离包按“命令 + 输出位置约定”安装（OMP 17.2.15 的安装器接受本地**目录**或 registry spec，不接受 `.tgz` 文件）：
 

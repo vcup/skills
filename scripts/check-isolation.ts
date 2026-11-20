@@ -4,8 +4,9 @@
  *
  * Usage: bun scripts/check-isolation.ts [--observe] [INSTALL_DIR]
  *
- * INSTALL_DIR is an isolated rc.4 install (the same one `make host-check
- * INSTALL_DIR=...` uses).
+ * INSTALL_DIR is an isolated install of a tested DSH release (the same one
+ * `make host-check INSTALL_DIR=...` uses); the accepted set comes from
+ * `adapters/dsh/compatibility.ts` and an unknown or mixed install is refused.
  *
  * Gate-mode exit codes (default; `*-check` targets must not return green
  * without having verified):
@@ -13,8 +14,8 @@
  *   expectation
  * - 1 = some probe observed behavior contradicting its expectation
  * - 2 = unverified: no INSTALL_DIR given, or the requested INSTALL_DIR is
- *   unusable (missing, not an rc.4 install, provider unresolvable or outside
- *   the dir)
+ *   unusable (missing, not an install of a tested DSH release, provider
+ *   unresolvable or outside the dir)
  *
  * `--observe` switches to observation mode: identical honest output but the
  * first line reads OBSERVATION ONLY and the exit code is always 0; use it for

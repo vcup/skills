@@ -88,6 +88,9 @@ help:
 	@printf '%s\n' 'Diagnose — observation only, never a gate'
 	@printf '  %-16s %s\n' 'diagnose' '[read-only] observation only: reports what the environment does, asserts nothing, always exits 0'
 	@printf '%s\n' ''
+	@printf '%s\n' 'Upstream — explicit network; never installs, upgrades or widens support'
+	@printf '  %-16s %s\n' 'check-upstream' '[network] read public npm dist-tags and classify them against the supported set'
+	@printf '%s\n' ''
 	@printf '%s\n' 'Install — opt-in, outside the default path'
 	@printf '  %-16s %s\n' 'install-omp' '[writes live profile] needs CONFIRM=yes; installs the local OMP staging root'
 	@printf '  %-16s %s\n' 'install-smoke' '[network] installs the pinned skills CLI into a temporary directory and compares bytes'
@@ -175,13 +178,15 @@ require-target:
 .PHONY: require-install-dir
 require-install-dir: require-bun
 	@test -n "$(INSTALL_DIR)" || { \
+		releases=$$($(BUN) -e 'import {supportedVersionsText} from "./adapters/dsh/compatibility.ts"; process.stdout.write(supportedVersionsText())') || releases='a tested release'; \
+		default=$$($(BUN) -e 'import {DEFAULT_DSH_VERSION} from "./adapters/dsh/compatibility.ts"; process.stdout.write(DEFAULT_DSH_VERSION)') || default='the default release'; \
 		printf '%s\n' 'error: INSTALL_DIR is not set.' \
-		'  These gates run against a real isolated DSH rc.4 install, never against' \
+		"  These gates run against a real isolated DSH install ($$releases), never against" \
 		'  this working tree. Any writable directory outside the repository works;' \
 		'  create one once with:' \
-		'    dsh_install=$${TMPDIR:-/tmp}/dsh-rc4' \
+		'    dsh_install=$${TMPDIR:-/tmp}/dsh-install' \
 		'    mkdir -p "$$dsh_install" && cd "$$dsh_install" && npm init -y' \
-		'    npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24' \
+		"    npm install --ignore-scripts @deepseek-ai/dsh@$$default typescript@5.9 @types/node@24" \
 		'  The Host gates also need this repository'"'"'s probe package installed in that' \
 		'  directory, because the Loader resolves it like any other dependency:' \
 		'    make pack-dsh' \
@@ -253,6 +258,21 @@ typecheck-host: require-deps require-install-dir-types
 
 docs: require-python
 	@$(PYTHON) scripts/check-docs.py
+
+# ---------------------------------------------------------------------------
+# upstream observation — explicit network, never a gate and never an upgrade
+# ---------------------------------------------------------------------------
+# Reads the public npm registry and classifies what it finds against
+# `adapters/dsh/compatibility.ts`, the single source of truth for support.
+# Deliberately absent from check/test/package-check/all: the default gates stay
+# offline. Exit 0 = runtime tags within the supported set and every supported
+# release published; 1 = a runtime tag outside the set, a candidate to evaluate;
+# 2 = the observation failed (registry unreadable, or a supported release is
+# missing from a required package).
+.PHONY: check-upstream
+check-upstream: require-bun
+	@printf '%s\n' '== check-upstream: querying the public npm registry (network)'
+	@$(BUN) scripts/check-upstream.ts
 
 # ---------------------------------------------------------------------------
 # content

@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  DEFAULT_DSH_VERSION,
+  ENGINES_DSH,
+  SUPPORTED_DSH_VERSIONS,
+} from "../adapters/dsh/compatibility.ts";
+import {
   OUTPUT_BUDGET_BYTES,
+  PROBE_VERSION,
   REFERENCE_RESOURCES,
   SKILL_DIR,
   SKILL_FILE,
@@ -193,7 +199,16 @@ describe("pack staging", () => {
       dsh: { bundle: { patch: string } };
       peerDependencies: Record<string, string>;
     };
-    expect(manifest.engines.dsh).toBe("0.2.2-rc.4");
+    // The manifest range is derived from the tested set, not restated here: an
+    // exact disjunction, so a future release is refused rather than admitted.
+    expect(manifest.engines.dsh).toBe(SUPPORTED_DSH_VERSIONS.join(" || "));
+    expect(manifest.engines.dsh).not.toMatch(/[><^~]|\*|latest/);
+    // The peers carrying the DSH release use the same disjunction, so pnpm
+    // dedupes to the host's copy instead of installing a private one.
+    expect(manifest.peerDependencies["@deepseek-ai/dsh-skill"]).toBe(manifest.engines.dsh);
+    expect(manifest.peerDependencies["@deepseek-ai/dsh-tools"]).toBe(manifest.engines.dsh);
+    // cordis is a separate shared instance: its range does not move with DSH.
+    expect(manifest.peerDependencies["@deepseek-ai/cordis"]).toBe("~4.1.0");
     expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
     expect(Object.keys(manifest.peerDependencies).every((name) => name.startsWith("@deepseek-ai/"))).toBe(true);
   });

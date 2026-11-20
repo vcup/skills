@@ -27,7 +27,7 @@ make package-check          # 交付前离线聚合：check + test + pack + insp
 
 ```bash
 make pack-dsh
-dsh_probe_package="$(pwd)/build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz"   # 在仓根捕获绝对路径
+dsh_probe_package="$(pwd)/build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz"   # 在仓根捕获绝对路径
 dsh_install="$(mktemp -d)/dsh-rc4"                                       # 临时且可丢弃；TMPDIR 满时先 export TMPDIR=<可写目录>
 mkdir -p "$dsh_install" && cd "$dsh_install" && npm init -y
 npm_config_cache="$dsh_install/.npm-cache" npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24
@@ -60,6 +60,7 @@ make host-check INSTALL_DIR="$dsh_install"
 | `test-watch` | 监视模式测试，Ctrl-C 退出 | 无 | 写临时目录、长驻 |
 | `typecheck` | 仓库类型检查与无 DSH 依赖的模块 | 无 | 只读 |
 | `docs` | 文档链接与引用检查 | 无 | 只读 |
+| `check-upstream` | 显式联网读取公开 npm dist-tags，并按受测版本集分类 | 无；不在离线门链路中 | 联网、只读；见[版本支持与升级](UPGRADING.md) |
 
 ### 改内容
 
@@ -156,7 +157,7 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 
 ## 未验边界
 
-本仓库当前没有覆盖 profile 启动、Host/执行世界隔离、registry 发布、CI 远端实跑与 rc.5 兼容性的绿色结论。相关 `*-check` 是门，前置不齐即失败；`diagnose` 只是观察，返回 0 不构成通过。历史探针的边界仍以 [P1 交付记录](ensemble/P1-DELIVERY.md)为准。
+本仓库当前没有覆盖完整 profile 交互、Host/执行世界隔离、registry 发布与 CI 远端实跑的绿色结论。已声明支持 DSH `0.2.2-rc.4` 与 `0.2.2-rc.5`（默认 rc.5）及其升级流程见 [版本支持与升级](UPGRADING.md)；相关 `*-check` 是门，前置不齐即失败，`diagnose` 只是观察、恒 0 不构成通过。历史探针的边界仍以 [P1 交付记录](ensemble/P1-DELIVERY.md)为准。
 
 ## 环境与并行说明
 

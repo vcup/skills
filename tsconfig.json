@@ -7,7 +7,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun", "node"]
+    "types": [
+      "bun",
+      "node"
+    ]
   },
   "include": [
     "adapters/omp/**/*.ts",
@@ -24,6 +27,9 @@
     "scripts/profile-check.ts",
     "scripts/profile-check.test.ts",
     "scripts/check-isolation.ts",
-    "scripts/check-isolation.test.ts"
+    "scripts/check-isolation.test.ts",
+    "adapters/dsh/compatibility.ts",
+    "scripts/check-upstream.ts",
+    "scripts/check-upstream.test.ts"
   ]
 }

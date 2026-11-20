@@ -208,11 +208,64 @@ describe('resolveWithin (fail-closed provider resolution)', () => {
     // Bun's createRequire('/tmp/package.json') cannot find the packages here,
     // but the contract under test is: whatever happens, loadProvider must
     // never return a provider whose source lies outside the install dir.
+    // The release is judged first, so a directory that is not an install at all
+    // is refused for that reason rather than for a downstream resolve failure.
     const result = loadProvider('/tmp');
     if ('provider' in result) {
       expect(result.provider.source.startsWith('/tmp/')).toBe(true);
     } else {
-      expect(result.error).toMatch(/outside INSTALL_DIR|not resolvable|install dir/);
+      expect(result.error).toMatch(
+        /outside INSTALL_DIR|not resolvable|install dir|not a tested DSH release/,
+      );
+    }
+  });
+
+  test('loadProvider refuses a mixed install instead of measuring it', () => {
+    // Two DSH packages at different releases: the probe would load a different
+    // release than the host, so no verdict may be attributed to this directory.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-iso-mixed-'));
+    try {
+      for (const [name, version] of [
+        ['@deepseek-ai/dsh', '0.2.2-rc.5'],
+        ['@deepseek-ai/dsh-skill', '0.2.2-rc.5'],
+        ['@deepseek-ai/dsh-tools', '0.2.2-rc.4'],
+      ] as const) {
+        mkdirSync(join(dir, 'node_modules', name), { recursive: true });
+        writeFileSync(join(dir, 'node_modules', name, 'package.json'), `{"version":"${version}"}`);
+      }
+      const result = loadProvider(dir);
+      expect('error' in result).toBe(true);
+      if ('error' in result) expect(result.error).toContain('mixed DSH releases');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loadProvider refuses a probe-private peer copy at another release', () => {
+    // The host is consistent, but the plugin carries its own rc.4 copy: that is
+    // the mixed shape a pinned-exact peer would produce, and it is refused.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-iso-shadow-'));
+    try {
+      for (const [name, version] of [
+        ['@deepseek-ai/dsh', '0.2.2-rc.5'],
+        ['@deepseek-ai/dsh-skill', '0.2.2-rc.5'],
+        ['@deepseek-ai/dsh-tools', '0.2.2-rc.5'],
+      ] as const) {
+        mkdirSync(join(dir, 'node_modules', name), { recursive: true });
+        writeFileSync(join(dir, 'node_modules', name, 'package.json'), `{"version":"${version}"}`);
+      }
+      const nested = join(dir, 'node_modules/dsh-ensemble-probe/node_modules/@deepseek-ai/dsh-skill');
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(join(nested, 'package.json'), '{"version":"0.2.2-rc.4"}');
+
+      const result = loadProvider(dir);
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error).toContain('mixed DSH install');
+        expect(result.error).toContain('private');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
@@ -237,7 +290,7 @@ describe('runIsolationChecks (no real provider needed)', () => {
     expect(report.lines.join('\n')).toContain('nothing was verified');
   });
 
-  test('gate mode, INSTALL_DIR given but not an rc.4 install -> CONFIG ERROR, exit 2, stable across runs', async () => {
+  test('gate mode, INSTALL_DIR given but not a tested DSH install -> CONFIG ERROR, exit 2, stable across runs', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-iso-notinstall-'));
     try {
       for (let run = 0; run < 2; run++) {
@@ -246,9 +299,12 @@ describe('runIsolationChecks (no real provider needed)', () => {
         expect(report.counts.total).toBe(0);
         const text = report.lines.join('\n');
         expect(text).toContain('CONFIG ERROR:');
-        // Fail-closed: either unresolvable, or resolved outside the dir —
-        // never a provider loaded from somewhere else without saying so.
-        expect(text).toMatch(/not resolvable|outside INSTALL_DIR|did not export/);
+        // Fail-closed: the release is not one this gate measures, or the
+        // provider is unresolvable/outside the dir — never a provider loaded
+        // from somewhere else without saying so.
+        expect(text).toMatch(
+          /not a tested DSH release|not resolvable|outside INSTALL_DIR|did not export/,
+        );
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -274,7 +330,7 @@ describe('runIsolationChecks (no real provider needed)', () => {
   test('positive gate path with a real install (env-gated, like MAKE_TEST_INSTALL_DIR)', async () => {
     const installDir = process.env.ISOLATION_TEST_INSTALL_DIR;
     if (installDir === undefined || installDir === '') {
-      console.log('skip: set ISOLATION_TEST_INSTALL_DIR=<isolated rc.4 install> to run the positive gate path');
+      console.log('skip: set ISOLATION_TEST_INSTALL_DIR=<isolated DSH install of a tested release> to run the positive gate path');
       return;
     }
     const report = await runIsolationChecks(installDir);

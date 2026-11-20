@@ -160,19 +160,55 @@ describe("validateInstallDir", () => {
 
     expect(report.ok).toBe(false);
     expect(report.problems.join("\n")).toContain("no @deepseek-ai/dsh-skill");
-    // The message tells the maintainer how to create the install.
+    // The message names the tested set and the default, so the maintainer knows
+    // what to install instead of guessing a version.
     expect(report.problems.join("\n")).toContain("0.2.2-rc.4");
+    expect(report.problems.join("\n")).toContain("0.2.2-rc.5");
     await rm(root, { recursive: true, force: true });
   });
 
-  test("rejects a different DSH version rather than silently accepting it", async () => {
+  test("accepts both tested releases, not only the default one", async () => {
+    for (const version of ["0.2.2-rc.4", "0.2.2-rc.5"]) {
+      const root = await temporaryRoot();
+      await mkdir(join(root, "node_modules/@deepseek-ai/dsh-skill"), { recursive: true });
+      await writeFile(join(root, "node_modules/@deepseek-ai/dsh-skill/package.json"), `{"version":"${version}"}`);
+
+      const report = validateInstallDir(root);
+      expect(report.ok).toBe(true);
+      expect(report.release).toBe(version);
+
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an untested DSH version rather than silently accepting it", async () => {
     const root = await temporaryRoot();
     await mkdir(join(root, "node_modules/@deepseek-ai/dsh-skill"), { recursive: true });
-    await writeFile(join(root, "node_modules/@deepseek-ai/dsh-skill/package.json"), '{"version":"0.2.2-rc.5"}');
+    await writeFile(join(root, "node_modules/@deepseek-ai/dsh-skill/package.json"), '{"version":"0.2.2-rc.6"}');
 
     const report = validateInstallDir(root);
     expect(report.ok).toBe(false);
-    expect(report.problems.join("\n")).toContain("expected 0.2.2-rc.4");
+    expect(report.problems.join("\n")).toContain("outside the tested DSH set");
+    expect(report.problems.join("\n")).toContain("0.2.2-rc.6");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("rejects a mixed install: two DSH packages at different releases", async () => {
+    const root = await temporaryRoot();
+    for (const [name, version] of [
+      ["@deepseek-ai/dsh-skill", "0.2.2-rc.4"],
+      ["@deepseek-ai/dsh-tools", "0.2.2-rc.5"],
+    ] as const) {
+      await mkdir(join(root, "node_modules", name), { recursive: true });
+      await writeFile(join(root, "node_modules", name, "package.json"), `{"version":"${version}"}`);
+    }
+
+    const report = validateInstallDir(root);
+    expect(report.ok).toBe(false);
+    expect(report.problems.join("\n")).toContain("mixed DSH releases");
+    // A mixed install has no single release, so nothing may be reported as one.
+    expect(report.release).toBeUndefined();
 
     await rm(root, { recursive: true, force: true });
   });
