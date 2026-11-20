@@ -1,6 +1,6 @@
 # Ensemble：领域与插件设计
 
-这是面向 DSH `0.2.2-rc.4` 的插件设计与实施准备。P0约定已覆盖领域动作、权限、存储、管理与三条完整旅程；[路线图](../../ROADMAP.md)记录设计复核和P1–P7交付阶段。DSH 产品实现尚未开始（领域工具、Client 与外置 archive 均未实现）；工作树中已有 P1 的**有界产物/技术探针**——确定性内容装配、OMP 独立包和 DSH **Host-only 探针**（公开 Loader 上的技能注册与固定参考读回），它们不是 DSH 产品实现，证据与未验门槛见 [P1 交付记录](P1-DELIVERY.md)。当前可使用的可移植方法见[技能](../../skills/ensemble/SKILL.md)、[术语](../../skills/ensemble/GLOSSARY.md)和[演进阅读指引](../../skills/ensemble/EVOLUTION-TEMPLATE.md)，现有适配见[OMP指南](../../adapters/omp/README.md)。
+**本页是设计契约/规格，不是已经可用的一键业务流。** 它规定目标、领域语义、职责边界与验收方向；文中“使用路径”是待实现的目标流程，当前不表示用户能走完整业务流。面向 DSH `0.2.2-rc.4`，P0 约定覆盖领域动作、权限、存储、管理与三条完整旅程；[路线图](../../ROADMAP.md)记录设计复核和 P1–P7 交付阶段。DSH 产品实现尚未开始（领域工具、Client 与外置 archive 均未实现）；工作树中已有 P1 的**有界产物/技术探针**——确定性内容装配、OMP 独立包和 DSH **Host-only 探针**（公开 Loader 上的技能注册与固定参考读回），它们不是 DSH 产品实现，逐项状态与未验门槛以 [P1 交付记录](P1-DELIVERY.md)为唯一权威。当前可使用的可移植方法见[技能](../../skills/ensemble/SKILL.md)、[术语](../../skills/ensemble/GLOSSARY.md)和[演进阅读指引](../../skills/ensemble/EVOLUTION-TEMPLATE.md)，现有适配见[OMP指南](../../adapters/omp/README.md)。
 
 接入基线固定为正式标签 `dsh-v0.2.2-rc.4`，提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`；已核对[源码包清单](https://github.com/deepseek-ai/deepseek-harness/blob/3f321d32bfe382212a8ed8785c1d47a5a300aa23/package.json#L1-L9)和[npm 精确版本](https://registry.npmjs.org/@deepseek-ai%2Fdsh/0.2.2-rc.4)。核验时 `next` 指向该版，但可变标签不作为可复现依赖。开发分支即使包版本相同，也不能替代发行源码的接口依据；已确认发布不等于本插件完成安装或运行验收。支持该基线的统一subagent树。此前核验的npm `latest`指向rc.1；该版仍使用[独立具名Team创建入口](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/experimental/tool-agent-team/src/index.ts)，不属于本适配目标。具体部署的模型/provider/effort、端点与凭证不属于本仓库。
 
@@ -31,6 +31,8 @@
 | 核对旧内容每项如何替代 | [表达矩阵与样例](REPLACEMENT-MAP.md) |
 | 分配实现与验收 | [实施准备](IMPLEMENTATION.md)及[路线图](../../ROADMAP.md) |
 | 隔离纯skill、OMP、DSH的安装和使用内容 | [三路径分发设计](DISTRIBUTION.md) |
+| 核对当前已实现/已提交/未发布的探针状态与未验边界 | [P1 交付记录](P1-DELIVERY.md)及[路线图](../../ROADMAP.md) |
+| 在本仓库运行构建、检查、测试与打包 | [开发环境与操作指南](../../docs/DEVELOPMENT.md) |
 | 查研究依据、审阅反例与判断变化 | [研究索引](research/README.md)及[设计演进](EVOLUTION.md) |
 
 ```mermaid
@@ -49,7 +51,9 @@ flowchart LR
 
 箭头表示信息交接，不是固定角色流水线。编排不会被存储实现接管，学习模块也不会私自启动新模型回合。
 
-## 一条完整使用路径
+## 一条完整使用路径（设计契约，尚未实现）
+
+以下八步是待实现的目标流程与验收语义，不是当前用户可以执行的步骤；DSH 领域工具、外置 archive、Client/GUI 与授权看板尚未实现。当前仅 P1 有界技术探针在工作树中可用，状态见 [P1 交付记录](P1-DELIVERY.md)。
 
 1. 用户在 Host 配置私有档案根与项目绑定。托管写入始终自动版本化；停用档案后停止写入。凭证继续由 DSH 管理，环境偏好在独立仓库保存。
 2. 用户调用 ensemble；Lead 通过 `open` 建立目标和覆盖。工具返回 invocation 身份及 revision，程序已生成初始检查点并保存版本。

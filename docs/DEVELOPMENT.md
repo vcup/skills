@@ -125,6 +125,7 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 | `content-build` | 写（skill 或 staging） | 写（omp/dsh staging） | — | — | — |
 | `pack` / `pack-omp` / `pack-dsh` / `inspect` | — | 写 | — | — | — |
 | Host 门（`typecheck-host`/`host-check`/`profile-check`/`isolation-check`） | — | — | 在 INSTALL_DIR 内建 scratch | — | — |
+| `diagnose` | — | — | 在 INSTALL_DIR 内建 scratch（观察型，恒 exit 0，不下结论） | — | — |
 | `install-smoke` | — | — | 写 | — | 写 |
 | `install-omp` | — | — | — | 写 | — |
 | `clean` / `clean-all` | — | 删生成路径 | — | — | — |

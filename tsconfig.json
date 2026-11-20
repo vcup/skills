@@ -17,6 +17,7 @@
     "scripts/pack-omp.test.ts",
     "scripts/pack-dsh.ts",
     "scripts/pack-dsh.test.ts",
+    "scripts/check-docs.test.ts",
     "scripts/project-tasks.ts",
     "scripts/project-tasks.test.ts",
     "scripts/makefile.test.ts",

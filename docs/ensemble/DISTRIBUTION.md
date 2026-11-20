@@ -86,6 +86,6 @@ omp install ./build/pack/omp/staging
 | 参考闭包 | 每个入口、角色autoload和按需参考逐一展开；内部链接存在且留在本产物，缺文件直接使构建失败 |
 | 单独安装 | 在干净环境用上述两条`npx skills@latest add vcup/skills`命令分别检查技能发现与ensemble选择；OMP/DSH从独立包安装。安装根、README与帮助只含本路径内容；同名重复安装不合并 |
 | 实际加载 | OMP检查用户入口和成员autoload；DSH检查skill provider、全部reference枚举与Client帮助；纯skill在无构建工具、无母仓库本地文件时读完安装目录的所有参考 |
-| 同步与迁移 | 同一source revision构建三产物，common部分digest一致；CI重新生成纯skill后须与提交内容无差异，防止只改源而漏提交；升级保留用户数据与纯skill原安装地址。当前工作树产物经 `check skill` 一致、CI 仅在工作树定义、未在 GitHub 实跑，也未提交 |
+| 同步与迁移 | 同一source revision构建三产物，common部分digest一致；CI重新生成纯skill后须与提交内容无差异，防止只改源而漏提交；升级保留用户数据与纯skill原安装地址。当前工作树产物经 `check skill` 一致；内容装配与包探针见提交 749df3d，CI 工作流在工作树定义且已提交，但**未在 GitHub 实跑**、包**未发布**（逐项状态见 [P1 交付记录](P1-DELIVERY.md)） |
 
-内容隔离归C01/C15与P1打包职责，最终由P7逐路径验收。工作树已实现的顺序：先分出common和三套路径内容→生成纯skill目录→构建OMP/DSH独立包→验证三条路径的本地安装与加载闭包；提交纯skill目录、GitHub CI 实跑、OMP入口迁移、发布与远端安装仍待完成。构建规则和路径归属只有这一处维护；每个平台只维护自己的操作说明与Adapter。
+内容隔离归C01/C15与P1打包职责，最终由P7逐路径验收。工作树已实现并已提交的顺序：先分出common和三套路径内容（749df3d）→生成并提交纯skill目录（749df3d）→构建OMP/DSH独立包（749df3d）→验证三条路径的本地安装与加载闭包；**GitHub CI 实跑、OMP入口迁移、发布与远端安装仍待完成**。构建规则和路径归属只有这一处维护；每个平台只维护自己的操作说明与Adapter。
