@@ -20,6 +20,57 @@ open ranges such as `>=0.2.2-rc.4` or `^0.2.2-rc.4` would admit future
 prereleases nobody tested. An unknown or future release is refused until it is
 verified and added on purpose. See [Version support and upgrade](../../docs/UPGRADING.md).
 
+## Owner archive replay (maintainers)
+
+0.2.0 adds a **bounded** owner-only archive surface; it does **not** mean P2 is
+complete. The namespace is `ensembleArchive` on the Typert Remote gateway, with
+four methods — `initialize`, `bind`, `status`, `readBack` — each taking exactly
+one object parameter named `request`. There is **no** `dsh` subcommand and **no**
+Make target for this surface: call it from an authenticated owner Peer through
+the gateway. In-process calls are refused because they have no gateway
+`invocation`. Authority comes from the invocation, never from request fields.
+
+Verified gateway-tier evidence (packed 0.2.0 tgz, real
+`TypertGatewayService.invoke`): `initialize` ok (`arch-9bdb9ddae63d74c3`,
+sequence 1); `bind` ok (sequence 2, `binding.canonicalAddress` recorded); a
+stale `bind` returned `revision_conflict`; after a Host restart `status` showed
+the same `headRevision` and `archiveId`; `readBack` returned 277 bytes
+containing `ensemble-archive/v1`. The real Web token/cookie handshake round-trip
+is **still unverified** — gateway authorization is verified, not browser login.
+
+Set `DSH_ENSEMBLE_ARCHIVE_ROOT` in the Host process **before it starts**
+(systemd `Environment=`, shell export, or container env). It is read once in
+`apply()`; changing it later requires a restart. It must be an absolute path
+outside every bound source; the directory may not exist yet and is created on
+first `initialize`. The plugin checks non-overlap after `realpath` and records
+the owner-supplied `worldIdentity` in the binding; whether Host and source are
+in the same execution world is the owner's deployment assertion, **not**
+something the plugin proves.
+
+The full user-visible root refusals from the Remote are:
+
+- unset/empty: `the configured archive root is unusable: the archive root is empty: set DSH_ENSEMBLE_ARCHIVE_ROOT to an absolute path outside every bound source`
+- relative: `the configured archive root is unusable: the archive root must be absolute, not "<value>": a relative path resolves against a process cwd this code does not own` (`<value>` is quoted, e.g. `not "relative/archive":`)
+- overlap, root inside source: `the configured archive root is unusable: the archive root <canonical> is inside the bound source <canonicalSource>; the archive must live outside every source it records`
+- overlap, source inside root: `the configured archive root is unusable: the bound source <canonicalSource> is inside the archive root <canonical>; a commit there would appear in the user's own repository`
+
+Replay sequence (owner Peer, same archive root throughout):
+
+1. `export DSH_ENSEMBLE_ARCHIVE_ROOT=<absolute path outside the source>`.
+2. Start the Host and connect as the authenticated owner Peer.
+3. `initialize { request: { source_descriptor, initial_grants, expected_revision: "absent" } }`; record `committedRevision`.
+4. `bind { request: { source_descriptor, reason, expected_revision: <committedRevision> } }`.
+5. `status { request: {} }`; record `headRevision`.
+6. Restart the Host, reconnect, `status { request: {} }`; `headRevision` and `archiveId` must be unchanged.
+7. `readBack { request: { revision: <headRevision>, path: "meta.json" } }`.
+
+`source_descriptor` carries owner-supplied `worldIdentity`, `canonicalAddress`,
+`nativeWorkspaceRef`, and optional `nativeSessionRef`/`baseline`. Boundary
+rules: `expected_revision` must be the commit id just read; `latest` and `HEAD`
+are refused; `absent` is accepted only by `initialize`; a second `initialize`
+returns `archive_already_initialized`. No grant/revoke/takeover, model write
+tool, or Client/GUI exists in 0.2.0.
+
 ## Files
 
 | File | Role |
@@ -36,7 +87,7 @@ verified and added on purpose. See [Version support and upgrade](../../docs/UPGR
 
 ## Package
 
-`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz`
+`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz`
 (git-ignored). The bundled skill text comes from the in-memory
 `build('dsh')` result of `scripts/build-ensemble.ts`; the ignored default
 staging directory is never read, so a stale checkout cannot enter a package.
@@ -85,8 +136,8 @@ From the repository root, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.1
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.2.0
 dsh --profile web                                    # start DSH
 ```
 
@@ -96,7 +147,7 @@ that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
 ```
 
 `add` prints two lines that are **not** failures — `Agent skills awaiting
@@ -113,7 +164,7 @@ scratch="$(mktemp -d)"
 export DSH_HOME="$scratch/home" npm_config_cache="$scratch/npm-cache" PNPM_HOME="$scratch/pnpm"
 export PATH="<your-rc4-install>/node_modules/.bin:$PATH"   # provides the dsh CLI
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
 dsh --profile web
 ```
 
@@ -182,7 +233,7 @@ type-checks `index.ts` or `loader-check.ts` without such an install.
 Historical P1 baseline observation in a container-only isolated install
 (published rc.4 packages plus the then-current 0.1.0 probe tarball, with an
 isolated home). The version and support strings in this table are what was
-measured then; current install commands above use 0.1.1 and the explicit
+measured then; current install commands above use 0.2.0 and the explicit
 rc.4/rc.5 set.
 
 | Command | Result |
@@ -255,11 +306,13 @@ Profile boot in a container install is not evidence about a live Host profile.
 
 ## What this is not
 
-Not implemented and not accepted here: domain/coordination tools, an external
-Git archive, receipts or recovery, archive authorization and binding, the
-Client/GUI half, settings, model/provider selection policy, and any claim about
-Host/execution-world separation. The probe runs in the same execution world as
-its caller and says so.
+0.2.0's owner archive is a bounded first slice, not "P2 complete". Not
+implemented and not accepted here: model-facing domain write tools,
+grant/revoke/takeover, the Client/GUI half or settings, model/provider selection
+policy, and any claim that the plugin proves physical Host/execution-world
+separation. The isolated Host-local group runs archive Git in its own
+subprocess/sandbox scope; whether Host and source share an execution world is
+the owner's deployment assertion recorded as `worldIdentity`, not plugin proof.
 
 `loader-check.ts` proves the published Loader loads this package in a container
 install. It is not evidence about a real Host, a running GUI, or a profile

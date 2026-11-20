@@ -20,8 +20,8 @@ Add the package to a profile that has an app row. `web` is the shipped profile
 and is the safe choice:
 
 ```bash
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
-dsh plugin --profile web list      # shows dsh-ensemble-probe@0.1.1
+dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web list      # shows dsh-ensemble-probe@0.2.0
 dsh --profile web
 ```
 
@@ -67,21 +67,35 @@ links, and returns at most 65536 bytes per call. A larger resource fails with
 `OUTPUT_BUDGET_EXCEEDED`; the probe does not paginate or truncate. Failures are
 reported, never replaced by a different source.
 
+## Owner archive (bounded)
+
+0.2.0 exposes an owner-only Remote namespace `ensembleArchive` with
+`initialize`, `bind`, `status`, and `readBack`; each takes one object argument
+named `request`. Reach it only as an authenticated owner Peer through the
+Typert Remote gateway — there is no `dsh` subcommand for it and in-process
+calls have no gateway invocation and are refused. Set
+`DSH_ENSEMBLE_ARCHIVE_ROOT` before the Host starts (read once at plugin load);
+it must be absolute and outside every bound source; the directory is created on
+first `initialize`. A relative, empty, or overlapping root is refused. The
+plugin validates non-overlap after realpath and records the owner-supplied
+`worldIdentity` in the binding; it does not prove Host and source share an
+execution world. The real Web token/cookie handshake is not part of the
+verified evidence — gateway authorization is.
+
 ## Capability status
 
-The bundled method is a **pre-release method resource**. These are **not
-implemented and not accepted** in this package:
+0.2.0 is a bounded first slice, **not phase 2 complete**. The owner archive
+above is implemented; the following are **not** implemented or accepted here:
 
-- domain tools for coordination, records, or learning;
-- an external Git archive, its transactions, receipts, or recovery;
-- authorization and binding for archive access;
+- model-facing domain write tools for coordination, records, or learning;
+- grant/revoke/takeover of archive authority;
 - a Client/GUI half, resource views, or settings;
 - model/provider selection policy;
-- any guarantee about Host/execution-world separation.
+- any guarantee about physical Host/execution-world separation.
 
-The method text states the same limits. When a step of the method needs a
-capability this package does not provide, report the gap; do not improvise a
-records mechanism and do not substitute another toolchain's storage.
+When a step of the method needs a capability this package does not provide,
+report the gap; do not improvise a records mechanism or substitute another
+toolchain's storage.
 
 ## Uninstall
 

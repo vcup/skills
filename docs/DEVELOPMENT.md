@@ -27,7 +27,7 @@ make package-check          # 交付前离线聚合：check + test + pack + insp
 
 ```bash
 make pack-dsh
-dsh_probe_package="$(pwd)/build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz"   # 在仓根捕获绝对路径
+dsh_probe_package="$(pwd)/build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz"   # 在仓根捕获绝对路径
 dsh_install="$(mktemp -d)/dsh-rc4"                                       # 临时且可丢弃；TMPDIR 满时先 export TMPDIR=<可写目录>
 mkdir -p "$dsh_install" && cd "$dsh_install" && npm init -y
 npm_config_cache="$dsh_install/.npm-cache" npm install --ignore-scripts @deepseek-ai/dsh@0.2.2-rc.4 typescript@5.9 @types/node@24

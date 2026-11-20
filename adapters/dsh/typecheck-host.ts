@@ -31,7 +31,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -48,22 +48,51 @@ const HOST_MODULES = ["index.ts", "loader-check.ts"] as const;
 /**
  * Every module copied, so relative imports resolve inside the scratch root.
  *
- * This is a hand-maintained closure: a new module reached from `index.ts`,
- * `loader-check.ts` or one of their imports must be added here, or `tsc` would
- * resolve it from this repository and the gate would prove nothing about the
- * install. `compatibility.ts` is in the closure because `meta.ts` re-exports
- * from it.
+ * The list is derived from the directory rather than hand-maintained, because a
+ * hand-maintained closure fails silently in the worst possible way: omit a
+ * module and `tsc` resolves the import from this repository instead of the
+ * install, so the gate still exits 0 while proving nothing about the install.
+ * That failure was observed here — deleting `owner-service.ts` from a
+ * hand-written list left the gate green.
+ *
+ * Deriving it means the closure cannot drift: every non-test module in this
+ * directory is copied, and the assertion below refuses to run if the two
+ * disagree in either direction.
  */
-const COPIED_MODULES = [
-  "compatibility.ts",
-  "index.ts",
-  "loader-check.ts",
-  "meta.ts",
-  "reference.ts",
-  "skill.ts",
-] as const;
-
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/** The non-test modules in this directory, sorted. */
+function moduleFiles(): string[] {
+  return readdirSync(HERE)
+    .filter((name) => name.endsWith(".ts"))
+    .filter((name) => !name.endsWith(".test.ts"))
+    .filter((name) => name !== "typecheck-host.ts")
+    .sort();
+}
+
+/**
+ * Confirm the derived closure covers the directory exactly.
+ *
+ * Two failures are possible and both must be loud: a module that exists but is
+ * not copied (the gate would measure the repository), and a stale entry for a
+ * module that no longer exists (which would hide a rename).
+ */
+function assertClosureComplete(): void {
+  const present = moduleFiles();
+  if (COPIED_MODULES.join(",") !== present.join(",")) {
+    fail(
+      `the module closure does not match ${HERE}: copied [${COPIED_MODULES.join(", ")}] ` +
+        `but present [${present.join(", ")}]`,
+    );
+  }
+  // The entry modules must be in the closure, or nothing would be checked.
+  for (const entry of HOST_MODULES) {
+    if (!COPIED_MODULES.includes(entry)) fail(`the module closure is missing the entry module ${entry}`);
+  }
+}
+
+/** The closure the gate copies: every non-test module in this directory. */
+const COPIED_MODULES = moduleFiles();
 
 function fail(message: string): never {
   console.error(`typecheck-host: ${message}`);
@@ -73,6 +102,8 @@ function fail(message: string): never {
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
+
+assertClosureComplete();
 
 const installArg = process.argv[2];
 if (installArg === undefined) {

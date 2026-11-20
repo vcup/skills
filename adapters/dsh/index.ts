@@ -9,12 +9,16 @@
  * 1. registers one **user-invocable** skill provider (`ensemble`) whose body is
  *    the generated DSH artifact bundled in this package;
  * 2. registers one model-facing tool, `ensemble_reference`, that reads back a
- *    fixed enumeration of packaged reference files.
+ *    fixed enumeration of packaged reference files;
+ * 3. registers one **owner-only** management Remote (`ensembleArchive`) that
+ *    initialises and reads back a versioned archive, running its Git in an
+ *    isolated Host-local execution group.
  *
- * It deliberately implements none of the managed product: there is no domain
- * tool set, no external archive, no Git access, no authorization board, no
- * learning publication, no Client/UI half, and no model-selection policy. The
- * bundled method text says the same thing in its `Capability status` section.
+ * It still implements none of the managed product: no model-facing domain tool,
+ * no grant/revoke/takeover, no learning publication, no Client/UI half, and no
+ * model-selection policy. The owner Remote is the only write surface, and it
+ * refuses any caller that is not an authenticated owner. The bundled method
+ * text says the same thing in its `Capability status` section.
  *
  * Only this module imports `@deepseek-ai/*`; the parsing, allowlist and budget
  * logic live in dependency-free siblings so they are tested without a DSH
@@ -35,6 +39,11 @@ import {
   SKILL_DIR,
   SKILL_FILE,
 } from "./meta.ts";
+import { createOwnerService, type OwnerServiceDeps } from "./owner-service.ts";
+import { ARCHIVE_ROOT_ENV, type ProviderFactories } from "./archive.ts";
+import { LocalSubprocessRuntime } from "@deepseek-ai/dsh-subprocess-local";
+import { LocalSandboxProvider } from "@deepseek-ai/dsh-sandbox-local";
+import { createOwnerRemote, OWNER_SERVICE_KEY } from "./owner-remote.ts";
 import { createReferenceReader, ReferenceError, type ReferenceContent } from "./reference.ts";
 import { createSkillProvider } from "./skill.ts";
 
@@ -138,11 +147,71 @@ export function applyWith(ctx: Context, options: ApplyOptions): void {
 }
 
 /**
+ * Where the deployment's archive root comes from.
+ *
+ * An environment variable, read once at plugin start. It is deliberately not a
+ * plugin option the model can set and not `process.cwd()`: the archive must live
+ * where the deployment put it, and a Session cwd would put the archive wherever
+ * a session happened to start. When it is absent the plugin still loads and
+ * serves the skill and reference tool; the owner Remote reports
+ * `storage_unavailable` for every call instead of inventing a location.
+ */
+export { ARCHIVE_ROOT_ENV };
+
+/**
+ * Register the skill provider, the reference tool, and the owner archive Remote.
+ *
+ * The owner surface is built here rather than per call so the isolated
+ * Host-local group is a property of the installed plugin: if the group cannot be
+ * built, the Remote exists and refuses, rather than disappearing and leaving a
+ * caller to guess why.
+ * @param ctx - plugin context.
+ * @param options - installed skill directory, and provider factories for tests.
+ */
+export function applyWithOwner(
+  ctx: Context,
+  options: ApplyOptions & { readonly owner?: Partial<OwnerServiceDeps> } = { skillDir: join(packageRoot(), SKILL_DIR) },
+): void {
+  applyWith(ctx, options);
+
+  const archiveRoot = options.owner?.archiveRoot ?? process.env[ARCHIVE_ROOT_ENV] ?? "";
+  const service = createOwnerService({
+    ctx: ctx as never,
+    archiveRoot,
+    // The plugin mounts the local providers itself: the archive must run in its
+    // own isolated Host-local group, so it cannot borrow whatever execution
+    // world the profile happens to compose. A deployment that does not provide
+    // them still gets a loaded plugin, and every owner call reports
+    // `storage_unavailable` rather than silently writing somewhere else.
+    factories: options.owner?.factories ?? localProviderFactories,
+    ...(options.owner ?? {}),
+  });
+  createOwnerRemote(ctx, service, OWNER_SERVICE_KEY);
+}
+
+/**
+ * The published local providers, mounted into the isolated group.
+ *
+ * Imported lazily so a profile that never calls the owner surface does not pay
+ * for them, and so a missing package surfaces as `storage_unavailable` on a
+ * call rather than as a boot failure that hides which capability is absent.
+ */
+const localProviderFactories: ProviderFactories = {
+  subprocess: (group) => new LocalSubprocessRuntime(group as never),
+  sandbox: (group) =>
+    new LocalSandboxProvider(group as never, {
+      runnerCommand: [],
+      runnerFailureSignatures: [],
+      probeTimeoutMs: 5000,
+    }),
+};
+
+/**
  * Plugin entry point: read the artifact from this installed package.
  * @param ctx - plugin context.
  */
 export function apply(ctx: Context): void {
-  applyWith(ctx, { skillDir: join(packageRoot(), SKILL_DIR) });
+  applyWithOwner(ctx, { skillDir: join(packageRoot(), SKILL_DIR) });
 }
 
 export default { name, inject, apply };

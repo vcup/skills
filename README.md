@@ -71,7 +71,7 @@ remove it through OMP's plugin manager. See the [OMP guide](adapters/omp/README.
 
 ### DeepSeek Harness
 
-The DSH package is the **Host-only probe** `dsh-ensemble-probe@0.1.1`, built and
+The DSH package is the **Host-only probe** `dsh-ensemble-probe@0.2.0`, built and
 tested against DSH `0.2.2-rc.4` and `0.2.2-rc.5`; `0.2.2-rc.5` is the default
 for a fresh install. It registers the `ensemble` skill as user-invocable and
 one read-only `ensemble_reference` tool. It is not the full ensemble product:
@@ -98,8 +98,8 @@ From this repository, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.1.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.1
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.2.0
 dsh --profile web                                    # start DSH
 ```
 
@@ -119,7 +119,7 @@ from the directory that holds it, with a path relative to that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.1.1.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
 ```
 
 Two messages from `add` are **not** failures: `Agent skills awaiting approval: …`

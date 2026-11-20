@@ -9,9 +9,9 @@ the probe is the full adapter.
 
 | Axis | Current value | What it does **not** mean |
 |---|---|---|
-| Probe / plugin release | `dsh-ensemble-probe@0.1.1` | The DSH release it runs on; feature completeness |
+| Probe / plugin release | `dsh-ensemble-probe@0.2.0` | The DSH release it runs on; feature completeness |
 | DSH releases tested together | `0.2.2-rc.4` and `0.2.2-rc.5`; default `0.2.2-rc.5` | That every newer tag or `latest` release is supported |
-| Feature maturity | Pre-release method resource: no domain tools, external archive, Client/GUI, model-selection policy, or Host/execution-world separation guarantee | That a wider support set means a more complete product |
+| Feature maturity | 0.2.0 adds an owner-only archive Remote and an isolated Host-local runner; still no model-facing domain write, grant/revoke/takeover, Client/GUI, or physical cross-execution-world guarantee | That a wider support set or a new owner surface means phase 2 is complete |
 
 These axes change independently. A probe version bump may add a tested DSH
 release without adding features; a new DSH release is not supported merely
@@ -55,7 +55,8 @@ supported set.
 |---|---|---|---|
 | Added | 0.1.1 supports exactly rc.4 and rc.5, rc.5 default | Observed full matrix in skills-dev on real isolated installs of both releases: `typecheck-host` exit 0 both; real Loader 44 PASS / 0 FAIL both; `profile-check` exit 0 with 3/3 shapes on each; `isolation-check` 11/11 probes on each. Standard `dsh plugin add` of 0.1.1 exited 0 on both hosts; `plugin list` showed 0.1.1 and no private `dsh-skill`/`dsh-tools` copies (deduped to host). Installed manifests matched the declared set. Isolation probes are container-internal, not Host verification. | Clean rc.5 install uses the 0.1.1 tarball; see §4 |
 | Retained | rc.4 in the supported set | Same matrix above passed on rc.4; no forced move | Existing rc.4 profiles remain usable |
-| Deprecated (not dropped) | 0.1.0 as the recommended install | 0.1.0 pinned rc.4 alone and its own `engines.dsh` rejects rc.5 | Real CLI upgrade observed on an rc.4 host: `add 0.1.0` → list 0.1.0; `add 0.1.1` in the same profile → pnpm `- 0.1.0` / `+ 0.1.1`; final list and on-disk manifest 0.1.1 with the explicit set and no private peer copies. Use 0.1.1 for new installs; the in-place upgrade path is **verified**, not pending. |
+| Added | 0.2.0 owner archive surface | Measured against the packed tgz through a real `TypertGatewayService.invoke`: `initialize` ok (`arch-9bdb9ddae63d74c3`), `bind` ok with canonical address, stale `bind` refused (`revision_conflict`), restart `status` shows unchanged head and archive id, `readBack` ok (277 bytes containing `ensemble-archive/v1`). | 0.2.0 is still bounded: see the three-axis row above; do not read this as "P2 complete". Owner replay steps are in [the DSH adapter guide](../adapters/dsh/README.md#owner-archive-replay-maintainers). |
+| Deprecated (not dropped) | 0.1.0 as the recommended install | 0.1.0 pinned rc.4 alone and its own `engines.dsh` rejects rc.5 | Real CLI upgrade observed on an rc.4 host: `add 0.1.0` → list 0.1.0; `add 0.1.1` in the same profile → pnpm `- 0.1.0` / `+ 0.1.1`; final list and on-disk manifest 0.1.1 with the explicit set and no private peer copies. The in-place upgrade path is **verified**. For the current 0.2.0 capability, use the 0.2.0 tarball. |
 
 When a release later stops being supported, replace the relevant row with a
 **Dropped** row. The reason may be technical (failed matrix, security or

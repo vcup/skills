@@ -22,11 +22,15 @@ export const PROBE_PACKAGE_NAME = "dsh-ensemble-probe";
 /**
  * Probe version. Independent of the ensemble content version.
  *
- * 0.1.1 exists because 0.1.0 supported only `0.2.2-rc.4`. A same-version
- * rebuild cannot be distinguished by `dsh plugin list` or an upgrade check, so
- * the support change ships under a new version.
+ * 0.1.1 added support for `0.2.2-rc.5`; 0.1.0 supported only `0.2.2-rc.4`. A
+ * same-version rebuild cannot be distinguished by `dsh plugin list` or an
+ * upgrade check, so each capability change ships under a new version.
+ *
+ * 0.2.0 adds the owner archive surface (`initialize`/`bind`/`status`/`readBack`)
+ * and the independent Host-local runner seam. It is still bounded: there is no
+ * model-facing domain write, no grant/revoke/takeover, and no Client panel.
  */
-export const PROBE_VERSION = "0.1.1";
+export const PROBE_VERSION = "0.2.0";
 
 /**
  * The `engines.dsh` range written into the package manifest: the tested set as
@@ -97,6 +101,25 @@ export const OUTPUT_BUDGET_BYTES = 64 * 1024;
 
 /** Tool name registered for reading one enumerated reference. */
 export const REFERENCE_TOOL_NAME = "ensemble_reference";
+
+/**
+ * What this package does and does not do, recorded in the manifest.
+ *
+ * These are explicit so a reader of the installed package cannot mistake the
+ * owner archive surface for a complete product: `authorization` names the only
+ * authority that exists (the authenticated owner), and `modelTools` records that
+ * no model-facing domain tool is registered in this version.
+ */
+export const CAPABILITY_STATUS = {
+  /** Only an authenticated owner Remote call may manage the archive. */
+  authorization: "owner-only",
+  /** Git runs in the plugin's own isolated local subprocess/sandbox group. */
+  hostRunner: "isolated",
+  /** No model tool acts as owner, and no model domain write exists yet. */
+  modelTools: "none",
+  /** The product surface is still bounded; see the package README. */
+  lifecycle: "bounded",
+} as const;
 
 /** Staging directory of the packaged artifact, relative to the repository root. */
 export const STAGING_DIR = "build/pack/dsh";

@@ -1,9 +1,11 @@
 {
-  "//": "Repository-local type check for the DSH probe modules that do not import @deepseek-ai/*, plus scripts/pack-dsh*. index.ts and loader-check.ts are checked separately: adapters/dsh/typecheck-host.ts against an isolated install of a tested DSH release.",
+  "//": "Repository-local type check for the DSH probe modules that do not import @deepseek-ai/*, plus scripts/pack-dsh*. Every maintained module in this directory is listed explicitly, so a new module cannot be added without a typecheck covering it. index.ts and loader-check.ts are checked separately: adapters/dsh/typecheck-host.ts against an isolated install of a tested DSH release.",
   "//usage": "bunx tsc -p adapters/dsh/tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "strict": true,
@@ -11,7 +13,27 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun", "node"]
+    "types": [
+      "bun",
+      "node"
+    ]
   },
-  "include": ["compatibility.ts", "compatibility.test.ts", "meta.ts", "reference.ts", "skill.ts", "typecheck-host.ts", "../../scripts/pack-dsh.ts", "../../scripts/pack-dsh.test.ts"]
+  "include": [
+    "../../scripts/pack-dsh.test.ts",
+    "../../scripts/pack-dsh.ts",
+    "archive.test.ts",
+    "archive.ts",
+    "compatibility.test.ts",
+    "compatibility.ts",
+    "meta.ts",
+    "owner-service.test.ts",
+    "owner-service.ts",
+    "owner.test.ts",
+    "owner.ts",
+    "records.test.ts",
+    "records.ts",
+    "reference.ts",
+    "skill.ts",
+    "typecheck-host.ts"
+  ]
 }

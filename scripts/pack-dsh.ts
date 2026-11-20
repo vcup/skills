@@ -18,7 +18,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +30,7 @@ import {
   supportedVersionsText,
 } from "../adapters/dsh/compatibility.ts";
 import {
+  CAPABILITY_STATUS,
   PEER_DEPENDENCIES,
   PROBE_PACKAGE_NAME,
   PROBE_VERSION,
@@ -122,6 +125,10 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     dsh: { bundle: { patch: "./cordis.patch.yml" } },
     probe: {
       status: "host-only-probe",
+      // What this version actually does, stated in the installed manifest so a
+      // reader does not have to infer it from the source. 0.2.0 adds the owner
+      // archive surface and the isolated Host runner; it is still bounded.
+      capabilities: { ...CAPABILITY_STATUS },
       skill: SKILL_FILE,
       supportedDsh: [...SUPPORTED_DSH_VERSIONS],
       defaultDsh: DEFAULT_DSH_VERSION,
@@ -226,6 +233,7 @@ export async function stage(
     package: PROBE_PACKAGE_NAME,
     version: PROBE_VERSION,
     engines: { dsh: ENGINES_DSH },
+    capabilities: { ...CAPABILITY_STATUS },
     // The tested set is recorded in the artifact so an installed package can be
     // audited without reading this repository: `engines.dsh` alone does not say
     // which releases were exercised, only which are permitted.
@@ -260,34 +268,112 @@ export async function stage(
 }
 
 /**
- * Transpile the plugin entry to one ESM file.
+ * The modules the packaged entry is emitted from.
  *
- * `@deepseek-ai/*` stays external: the host supplies those instances, and
- * bundling a second copy would break service identity.
+ * Declared rather than discovered: the package ships exactly these, and the
+ * allowlist assertion in `stage()` would catch a change anyway.
+ */
+const PACKAGED_MODULES = [
+  "index.ts",
+  "archive.ts",
+  "compatibility.ts",
+  "meta.ts",
+  "owner.ts",
+  "owner-remote.ts",
+  "owner-service.ts",
+  "records.ts",
+  "reference.ts",
+  "skill.ts",
+] as const;
+
+/**
+ * Emit the plugin entry to one ESM file with `tsc`, then bundle that output.
+ *
+ * The two-step order is not a preference. DSH's Typert Gateway derives each
+ * Remote endpoint's wire descriptor by reading the method's source text through
+ * `Function.prototype.toString`. `Bun.build` transpiles TC39 decorators into
+ * `async[(_dec = [Remote], "status")](request)`, whose source text the gateway's
+ * parameter parser cannot read, so every method fails with
+ * `gateway/signature-invalid` **before its body runs** — the guard never gets a
+ * chance, and the packaged artifact behaves differently from the source it was
+ * built from. `tsc` keeps standard class-method syntax, so the emitted source is
+ * what the gateway parses; bundling the emitted JavaScript afterwards keeps the
+ * single-file package without re-transpiling the decorators.
+ *
+ * `--noCheck` because the Host modules need `@deepseek-ai/*` types that are not
+ * root dependencies; `adapters/dsh/typecheck-host.ts` is the gate that checks
+ * them properly against a real install.
  * @param root - repository root.
  * @returns the bundled entry source.
  */
 async function buildEntry(root: string): Promise<string> {
-  const result = await Bun.build({
-    entrypoints: [join(root, "adapters/dsh/index.ts")],
-    target: "node",
-    format: "esm",
-    external: ["@deepseek-ai/*"],
-    minify: false,
-  });
-  if (!result.success || result.outputs.length !== 1) {
-    fail(`bun build failed for adapters/dsh/index.ts: ${result.logs.map(String).join("; ")}`);
+  const typescript = join(root, "node_modules/typescript/bin/tsc");
+  if (!existsSync(typescript)) fail("packaging needs typescript; run `make setup` first");
+
+  const scratch = await mkdtemp(join(tmpdir(), "pack-dsh-emit-"));
+  try {
+    for (const name of PACKAGED_MODULES) {
+      await copyFile(join(root, "adapters/dsh", name), join(scratch, name));
+    }
+    await writeFile(join(scratch, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
+
+    const emitted = Bun.spawnSync(
+      [
+        process.execPath,
+        typescript,
+        "--noCheck",
+        "--target", "ES2022",
+        "--module", "ES2022",
+        "--moduleResolution", "Bundler",
+        "--skipLibCheck",
+        "--rewriteRelativeImportExtensions",
+        "--outDir", join(scratch, "out"),
+        ...PACKAGED_MODULES,
+      ],
+      { cwd: scratch, stdout: "pipe", stderr: "pipe" },
+    );
+    if (emitted.exitCode !== 0) {
+      fail(`tsc could not emit adapters/dsh: ${emitted.stderr.toString() || emitted.stdout.toString()}`);
+    }
+
+    const bundled = await Bun.build({
+      entrypoints: [join(scratch, "out", "index.js")],
+      target: "node",
+      format: "esm",
+      external: ["@deepseek-ai/*"],
+      minify: false,
+    });
+    if (!bundled.success || bundled.outputs.length !== 1) {
+      fail(`bun build failed for the emitted entry: ${bundled.logs.map(String).join("; ")}`);
+    }
+    const output = bundled.outputs[0];
+    if (output === undefined) fail("bun build produced no output for the emitted entry");
+    const text = await output.text();
+
+    // A mangled decorator form is a packaging defect that only shows up when a
+    // Remote is invoked, so refuse to ship it rather than discover it later.
+    if (/async\s*\[\s*\(/.test(text) || /\[_dec\$?\d*\s*=/.test(text)) {
+      fail(
+        "the emitted entry contains transpiled decorator syntax the Typert Gateway cannot parse; " +
+          "its Remote endpoints would fail with gateway/signature-invalid",
+      );
+    }
+
+    const foreign = [...text.matchAll(/from\s+"([^"]+)"/g)]
+      .map((match) => match[1] as string)
+      .filter(
+        (specifier) =>
+          !specifier.startsWith("node:") &&
+          !specifier.startsWith("@deepseek-ai/") &&
+          !specifier.startsWith("./"),
+      );
+    if (foreign.length > 0) {
+      fail(`bundled entry has unexpected external imports: ${foreign.join(", ")}`);
+    }
+    return text;
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
   }
-  const output = result.outputs[0];
-  if (output === undefined) fail("bun build produced no output for adapters/dsh/index.ts");
-  const text = await output.text();
-  const foreign = [...text.matchAll(/from\s+"([^"]+)"/g)]
-    .map((match) => match[1] as string)
-    .filter((specifier) => !specifier.startsWith("node:") && !specifier.startsWith("@deepseek-ai/") && !specifier.startsWith("./"));
-  if (foreign.length > 0) {
-    fail(`bundled entry has unexpected external imports: ${foreign.join(", ")}`);
-  }
-  return text;
 }
 
 /**
