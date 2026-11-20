@@ -78,7 +78,11 @@ domain tools, external archive, Client/GUI, and Host/execution-world separation
 are not implemented. Startup output, the isolated-first-run recipe, and the
 evidence behind these claims are in the [DSH adapter guide](adapters/dsh/README.md).
 
-**Prerequisites.** `dsh plugin` forwards to **pnpm**, so pnpm must be on `PATH`
+**Prerequisites.** This package requires DSH `0.2.2-rc.4`; **rc.5 is not
+supported**. `engines.dsh` is pinned to that exact release, so an install against
+any other version is rejected rather than attempted.
+
+`dsh plugin` forwards to **pnpm**, so pnpm must be on `PATH`
 (otherwise `add` fails with `pnpm was not found`, exit 127). Keep `PNPM_HOME`
 unchanged between `add` and `remove`, or `remove` fails on a store mismatch.
 `--profile` comes before the pnpm verb. Use a profile that has an app row; `web`
@@ -103,10 +107,18 @@ dsh plugin --profile web remove dsh-ensemble-probe
 Restart DSH afterwards to be sure the tool leaves the roster as well as the
 skill catalog.
 
-If you received the package on its own rather than from this repository, run the
-same `add` from the directory that contains the `.tgz`. Two messages from `add`
-are **not** failures: `Agent skills awaiting approval: …` and a peer-dependency
-`WARN`; `add` still exits 0.
+If you received the package on its own rather than from this repository, the
+tarball sits next to nothing else — `build/` does not exist for you. Run `add`
+from the directory that holds it, with a path relative to that directory:
+
+```bash
+cd <directory-containing-the-tgz>
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
+```
+
+Two messages from `add` are **not** failures: `Agent skills awaiting approval: …`
+and a peer-dependency `WARN`; `add` still exits 0.
+
 ## Use
 
 Invoke a skill with the deliverable, constraints, and completion checks.

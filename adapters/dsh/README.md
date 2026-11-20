@@ -9,6 +9,10 @@ checkout present?**
 It answers that question and nothing else. See [What this is
 not](#what-this-is-not).
 
+**Supported range:** DSH `0.2.2-rc.4` only. `engines.dsh` is pinned to that
+exact release, so an install against another version — rc.5 included — is
+rejected rather than attempted.
+
 ## Files
 
 | File | Role |
@@ -79,8 +83,14 @@ dsh plugin --profile web list                        # shows dsh-ensemble-probe@
 dsh --profile web                                    # start DSH
 ```
 
-If the package arrives on its own, run the same `add` from the directory that
-contains the `.tgz`.
+If the package arrives on its own, the tarball is not beside a `build/`
+directory. Run `add` from the directory that holds it, with a path relative to
+that directory:
+
+```bash
+cd <directory-containing-the-tgz>
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
+```
 
 `add` prints two lines that are **not** failures — `Agent skills awaiting
 approval: … Run "pnpm approve" to review them.` and a peer-dependency `WARN`.
