@@ -52,9 +52,83 @@ Repository operations go through the Make entry point (see the [development guid
 
 ```bash
 make pack-dsh                 # stage + npm pack
-make test-narrow              # repository tests for this probe
+make test                     # the full suite, including this probe's tests
 make typecheck                # type check, dependency-free modules
 ```
+
+`make test-narrow` runs only the content builder's tests
+(`scripts/build-ensemble.test.ts`); it does **not** run this probe's tests.
+
+## Installing the package into a profile
+
+`dsh plugin` forwards to **pnpm**, so pnpm must be on `PATH`; without it `add`
+fails with `pnpm was not found` (exit 127). `remove` also fails (exit 1) if
+`PNPM_HOME` differs from the one used for `add`. `--profile` precedes the pnpm
+verb. Both are prerequisites, not defects.
+
+Use a profile that has an app row. `web` is the shipped template and the safe
+choice: a composition with no app/startup row boots and then keeps running
+instead of printing help, which looks like a hang.
+
+From the repository root, every line runs in the same directory:
+
+```bash
+make pack-dsh
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.1.0
+dsh --profile web                                    # start DSH
+```
+
+If the package arrives on its own, run the same `add` from the directory that
+contains the `.tgz`.
+
+`add` prints two lines that are **not** failures — `Agent skills awaiting
+approval: … Run "pnpm approve" to review them.` and a peer-dependency `WARN`.
+Both are non-fatal; `add` exits 0.
+
+### Isolated first run
+
+A throwaway scratch root, so nothing touches `~/.dsh`. Run from the repository
+root (the `add` path is relative to it):
+
+```bash
+scratch="$(mktemp -d)"
+export DSH_HOME="$scratch/home" npm_config_cache="$scratch/npm-cache" PNPM_HOME="$scratch/pnpm"
+export PATH="<your-rc4-install>/node_modules/.bin:$PATH"   # provides the dsh CLI
+make pack-dsh
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.1.0.tgz
+dsh --profile web
+```
+
+### Startup output
+
+`dsh --profile web` serves on `127.0.0.1:3080` by default and prints:
+
+```text
+dsh web: http://127.0.0.1:<port>/?token=<redacted>
+dsh web: opening the default browser; pass --no-open to disable
+```
+
+The second line appears only when a browser handoff is available; `--no-open`,
+or an SSH session (`SSH_CONNECTION`/`SSH_TTY`), suppresses it. The URL carries a
+session token — treat it as a credential and do not paste it elsewhere.
+
+### Removing
+
+Use the same `DSH_HOME` and `PNPM_HOME`:
+
+```bash
+dsh plugin --profile web remove dsh-ensemble-probe
+```
+
+Both registrations are effects of the plugin's own fiber, so unloading disposes
+them. On a **running** server the skill leaves the catalog at once, but a tool
+already in the roster can linger until a later or fresh session; restart to be
+sure both are gone.
+
+The `update` verb exists and runs (`dsh plugin --profile web update` reports
+`Already up to date`), but it has never been exercised against a newer build
+because none exists yet. Recommend add, list, boot, and remove only.
 
 Two checks need an installation that resolves `@deepseek-ai/*`; neither is part
 of the full test or repository typecheck. Pass an already prepared isolated
@@ -97,14 +171,41 @@ tarball, with an isolated home):
 | `tsc -p tsconfig.json` | exit 0 |
 | `python3 scripts/check-docs.py` | exit 0 |
 | `node loader-check.ts` | exit 0, 44 PASS |
-| `dsh plugin --profile probe add <tarball>` | exit 0; bundle appended to `dsh.profile.bundles` |
-| `dsh --profile probe --dump-config` | exit 0; `# == dsh-ensemble-probe` layer present |
-| `dsh plugin --profile probe remove <tarball>` | exit 0; bundle and dependency removed |
-| `dsh --profile probe` and `--profile probe --help` | **timed out** (124) with no output; profile boot is **not verified** |
+| `dsh plugin --profile web add <tarball>` | exit 0; dependency added and `dsh-ensemble-probe` appended to `dsh.profile.bundles` |
+| `dsh plugin --profile web list` | exit 0; `dsh-ensemble-probe@0.1.0` listed |
+| `dsh --profile web --dump-config` | exit 0; `# == dsh-ensemble-probe` layer present |
+| `dsh --profile web` | exit 0; serves `127.0.0.1:3080` and prints its URL line (plus a browser-handoff line when one is available) |
+| `dsh plugin --profile web update` | exit 0; `Already up to date` (no newer build exists to exercise) |
+| `dsh plugin --profile web remove dsh-ensemble-probe` | exit 0; bundle and dependency removed |
+| `make profile-check INSTALL_DIR=<install>` | exit 0; 3/3 profile shapes measured on rc.4 |
+
+`dsh plugin` forwards to pnpm, so pnpm must be on `PATH`; without it `add` fails
+with `pnpm was not found` (exit 127). `remove` also fails (exit 1) if
+`PNPM_HOME` differs from the one used for `add`. `--profile` precedes the pnpm
+verb. Both are prerequisites, not defects.
+
+The earlier `dsh --profile probe` / `--profile probe --help` timeout (exit 124)
+was a measurement artifact, not a Loader failure: `--help` is the **app's** help,
+so a composition with no app/startup row boots successfully and then keeps
+running without printing one. That is also why the documented profile is `web`
+(a shipped template with an app row) rather than a hand-made base-only profile.
+`make profile-check` measures the distinction directly, in three shapes:
+
+- a shipped template with an app row prints its app help and exits 0;
+- a hand-composed profile with an app bundle does the same;
+- a profile with **no** app row boots and stays running — measured at the
+  deadline with no help output and no error, which is the expected success, not
+  a hang.
+
+So the accurate success criterion for a profile is: with an app row, it prints
+that app's help and exits 0; without one, it boots and keeps running, and the
+absence of `--help` output proves nothing. A profile that fails to boot reports
+its error or the timeout verbatim and `profile-check` exits 1.
 
 `--dump-config` shows the layer is composed; it does not show the row
 activating. The row's activation is proven by `loader-check.ts` under `boot()`,
 which is the same Loader the CLI uses, but not the CLI's own profile boot.
+Profile boot in a container install is not evidence about a live Host profile.
 
 ## Registration behaviour
 

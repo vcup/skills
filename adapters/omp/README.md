@@ -7,7 +7,7 @@ make pack-omp
 omp install ./build/pack/omp/staging
 ```
 
-OMP 17.2.15's installer accepts a local directory or a registry spec, but not a `.tgz` file, so the staging directory is the install target; the tarball from `npm pack` is an inspection artifact. The former mixed entry `omp install github:vcup/skills` is superseded and is not an unresolved remote install. These working-tree artifacts are not committed or published in this round; see the [P1 delivery record](../../docs/ensemble/P1-DELIVERY.md).
+OMP 17.2.15's installer accepts a local directory or a registry spec, but not a `.tgz` file, so the staging directory is the install target; the tarball from `npm pack` is an inspection artifact. The former mixed entry `omp install github:vcup/skills` is superseded and is not an unresolved remote install. These package sources are committed; the built package is not published to a registry and has no remote address; see the [P1 delivery record](../../docs/ensemble/P1-DELIVERY.md).
 
 OMP enables the plugin from its lockfile and discovers the package's `skills/` and `agents/` directories. No manual clone, local extension path, or separate skill install is required.
 

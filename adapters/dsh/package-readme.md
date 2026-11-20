@@ -10,14 +10,46 @@ reference reader, and nothing else.
 
 ## Install
 
+`dsh plugin` forwards to **pnpm**, so pnpm must be on `PATH`; without it `add`
+fails with `pnpm was not found` (exit 127). Keep `PNPM_HOME` the same across
+`add` and `remove`, or `remove` fails on a store mismatch. `--profile` comes
+before the pnpm verb.
+
+Add the package to a profile that has an app row. `web` is the shipped profile
+and is the safe choice:
+
 ```bash
-dsh plugin --profile <name> add ./dsh-ensemble-probe-0.1.0.tgz
-dsh --profile <name>
+dsh plugin --profile web add ./dsh-ensemble-probe-0.1.0.tgz
+dsh plugin --profile web list      # shows dsh-ensemble-probe@0.1.0
+dsh --profile web
 ```
 
 The bundle declares `dsh.bundle.patch`, so `dsh plugin add` appends it to the
 profile's bundle list. It requires a host that provides the `skills` and `tools`
 services (`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-tools`) at `0.2.2-rc.4`.
+
+Do **not** point `--profile` at a custom composition with no app/startup row:
+such a profile boots and then keeps running without printing help, which looks
+like a hang.
+
+Two messages from `add` are not failures: `Agent skills awaiting approval: … Run
+"pnpm approve" to review them.` and a peer-dependency `WARN`. Both are non-fatal
+and `add` exits 0.
+
+## First use
+
+Type the skill name in the composer:
+
+```text
+/ensemble <task, constraints, and completion checks>
+```
+
+The skill is user-invocable only. Model-facing catalogs and the `skill` tool do
+not offer it, so asking the model to "use the ensemble skill" will not reach it.
+
+Whether a model turn completes is outside this package's evidence: a turn needs
+provider credentials, and without an API key DSH reports
+`no API key for provider route`.
 
 ## What it registers
 
@@ -50,9 +82,18 @@ records mechanism and do not substitute another toolchain's storage.
 
 ## Uninstall
 
+Use the same `DSH_HOME` and `PNPM_HOME` you installed with:
+
 ```bash
-dsh plugin --profile <name> remove dsh-ensemble-probe
+dsh plugin --profile web remove dsh-ensemble-probe
 ```
 
 Both registrations are effects of the plugin's own fiber, so unloading the
-package removes the skill provider and the tool.
+package disposes them. On a **running** server the skill disappears from the
+catalog immediately, but a tool already in the roster can linger until a later
+or fresh session. Restart DSH if you need both gone at once.
+
+The `update` verb exists and runs (`dsh plugin --profile web update` reports
+`Already up to date`), but it has never been exercised against a newer build
+because none exists yet. This package therefore recommends add, list, boot, and
+remove only.

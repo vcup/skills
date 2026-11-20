@@ -325,21 +325,23 @@ loader-check: require-node require-install-dir
 	printf '{"type":"module"}\n' > "$$scratch/package.json" || exit 1; \
 	cd "$$scratch" && DSH_PROBE_TMP="$$scratch/.probe" $(NODE) loader-check.ts
 
-# Both diagnosis scripts belong to later work. Until they exist, say so and
-# fail: a green target here would claim a capability nobody has verified.
+# Both diagnosis scripts ship with this repository, but a partial checkout or a
+# misassembled tree can still be missing one. When that happens, name the file
+# and exit 2: silently doing nothing would let a gate look like it passed.
 profile-check: require-bun
 	@test -f scripts/profile-check.ts || { \
-		printf '%s\n' 'error: profile-check is not implemented yet.' \
-		'  scripts/profile-check.ts does not exist, so DSH profile boot is still' \
-		'  unverified. Nothing was run and nothing is claimed.' >&2; \
+		printf '%s\n' 'error: profile-check is missing its required file.' \
+		'  scripts/profile-check.ts does not exist in this checkout, so DSH profile' \
+		'  boot cannot be checked here. Nothing was run and nothing is claimed.' >&2; \
 		exit 2; }
 	@$(BUN) scripts/profile-check.ts $(if $(INSTALL_DIR),"$(INSTALL_DIR)")
 
 isolation-check: require-bun
 	@test -f scripts/check-isolation.ts || { \
-		printf '%s\n' 'error: isolation-check is not implemented yet.' \
-		'  scripts/check-isolation.ts does not exist, so execution-world isolation is' \
-		'  still unverified. Nothing was run and nothing is claimed.' >&2; \
+		printf '%s\n' 'error: isolation-check is missing its required file.' \
+		'  scripts/check-isolation.ts does not exist in this checkout, so' \
+		'  execution-world isolation cannot be checked here. Nothing was run and' \
+		'  nothing is claimed.' >&2; \
 		exit 2; }
 	@$(BUN) scripts/check-isolation.ts $(if $(INSTALL_DIR),"$(INSTALL_DIR)")
 
