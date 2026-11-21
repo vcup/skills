@@ -6,8 +6,13 @@ Loader can load one package that (a) registers the `ensemble` skill as a
 user-invocable skill and (b) exposes one read-only tool over a fixed list of
 reference files bundled in the package.
 
-This package is not the ensemble product. It carries the method text and a
-reference reader, and nothing else.
+This package is not the ensemble product. It carries the method text, a
+reference reader, and a bounded owner archive (the `ensembleArchive` Remote and
+its `ensemble-archive` CLI). The CLI runs on plain Node — its client transport is
+bundled privately in `lib/transport.bundle.mjs`, so it needs **no external DSH
+install** to talk to a running Host. It does not carry model-facing write tools,
+grant/revoke/takeover, a Client/GUI, or any claim of physical Host/execution-world
+separation. See the owner archive section below for the bounded scope.
 
 ## Install
 
@@ -20,8 +25,8 @@ Add the package to a profile that has an app row. `web` is the shipped profile
 and is the safe choice:
 
 ```bash
-dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
-dsh plugin --profile web list      # shows dsh-ensemble-probe@0.2.0
+dsh plugin --profile web add ./dsh-ensemble-probe-0.3.0.tgz
+dsh plugin --profile web list      # shows dsh-ensemble-probe@0.3.0
 dsh --profile web
 ```
 
@@ -69,23 +74,111 @@ reported, never replaced by a different source.
 
 ## Owner archive (bounded)
 
-0.2.0 exposes an owner-only Remote namespace `ensembleArchive` with
+The package ships an owner-only Remote namespace `ensembleArchive` with
 `initialize`, `bind`, `status`, and `readBack`; each takes one object argument
 named `request`. Reach it only as an authenticated owner Peer through the
-Typert Remote gateway — there is no `dsh` subcommand for it and in-process
-calls have no gateway invocation and are refused. Set
-`DSH_ENSEMBLE_ARCHIVE_ROOT` before the Host starts (read once at plugin load);
-it must be absolute and outside every bound source; the directory is created on
-first `initialize`. A relative, empty, or overlapping root is refused. The
-plugin validates non-overlap after realpath and records the owner-supplied
+Typert Remote gateway. Set two variables before the Host starts (read once at
+plugin load), so changes need a restart:
+
+- `DSH_ENSEMBLE_ARCHIVE_ROOT` — absolute, outside every bound source; the
+  directory is created on first `initialize`. A relative, empty, or overlapping
+  root is refused.
+- `DSH_ENSEMBLE_ARCHIVE_WORLD` — explicitly chosen by the deployment; never
+  derived from a path or the session cwd.
+
+The plugin validates non-overlap after realpath and records the owner-supplied
 `worldIdentity` in the binding; it does not prove Host and source share an
-execution world. The real Web token/cookie handshake is not part of the
-verified evidence — gateway authorization is.
+execution world. A source whose world the deployment has not evidenced as the
+archive's own is refused rather than enabled.
+
+## Archive CLI
+
+0.3.0 ships `ensemble-archive`, the client for that Remote. It runs on plain Node
+— no external DSH install — because its client transport is bundled privately in
+`lib/transport.bundle.mjs`. It talks to a **running** Host over the Host's own
+client transport, so the Peer and its `owner` principal are assigned by the Host's
+connection layer from your session cookie. The command never builds a principal
+itself and never falls back to a local call: without a credential it sends
+nothing and exits 3.
+
+### Get a session cookie
+
+Start the web profile, then exchange the launch token it prints for a cookie:
+
+```bash
+dsh --profile web --port 3731
+# the Host prints a URL carrying a launch token
+curl -c jar.txt "http://127.0.0.1:3731/?token=<launch token>"
+```
+
+Use the jar directly, or extract one line from it:
+
+```bash
+awk '/dsh-auth-/ {print $6"="$7}' jar.txt > cookie.txt
+```
+
+### Run a command
+
+```bash
+ensemble-archive status --cookie-file cookie.txt
+
+ensemble-archive initialize --cookie-file cookie.txt --request @init.json
+# init.json:
+# { "source_descriptor": { "worldIdentity": "...", "canonicalAddress": "...",
+#                          "nativeWorkspaceRef": "..." },
+#   "initial_grants": [ { "subjectId": "owner", "rights": ["manage"] } ] }
+
+ensemble-archive readBack --cookie-file cookie.txt \
+  --request '{"revision":"<40-hex commit>","path":"meta.json"}'
+```
+
+After a restart, `status` reports the same `headRevision`; no re-initialize is
+needed, and a second `initialize` on the same root is refused.
+
+| Option | Meaning |
+|---|---|
+| `--url <origin>` | Host origin, default `http://127.0.0.1:3731` |
+| `--request <json\|@file>` | the endpoint's `request` object |
+| `--cookie-file <path>` | cookie from a jar, a `Cookie:` line, or `name=value` |
+| `--cookie-stdin` | the same text on stdin |
+| `ENSEMBLE_ARCHIVE_COOKIE` | the same text in the environment |
+
+The credential is accepted only from a file, stdin, or that environment
+variable. `--cookie <value>` is refused on purpose: an argument would be visible
+in shell history and in a process listing. The value is never echoed.
+
+### Exit codes
+
+| Code | Meaning | Nothing was sent? |
+|---|---|---|
+| 0 | success | — |
+| 1 | the Host refused the operation (invalid input, unsafe path, revision conflict) | no, the Host answered |
+| 2 | usage error, including a credential passed on the command line | yes |
+| 3 | no credential, or an empty one | yes |
+| 4 | the Host rejected the credential | no, the Host answered 401 |
+| 5 | the Host could not be reached | yes |
+
+### Boundaries
+
+- **Headless HTTP + WebSocket only.** The same cookie, trust fence, and
+  admission path a browser uses are exercised; a real browser page load is not.
+- **Plain HTTP on loopback only.** `https` origins are accepted and
+  `redirect: "error"` is forced so the cookie cannot follow a redirect, but the
+  TLS and `Secure`-cookie branches were read, not run.
+- **A non-owner cannot be tested on this Host.** This release's principal map
+  has exactly one member, `owner`, so "an authenticated non-owner is refused" is
+  proven at the guard level, not over the transport.
+- `bind` shares the same guard, gateway, and CLI path as the other three
+  methods, but its own success/refusal vectors were not driven over the
+  transport.
+- The archive's Git runs in the plugin's own isolated local
+  subprocess/sandbox group, not through the session's execution world.
 
 ## Capability status
 
-0.2.0 is a bounded first slice, **not phase 2 complete**. The owner archive
-above is implemented; the following are **not** implemented or accepted here:
+0.3.0 is a bounded slice, **not phase 2 complete**. The owner archive and its
+CLI above are implemented; the following are **not** implemented or accepted
+here:
 
 - model-facing domain write tools for coordination, records, or learning;
 - grant/revoke/takeover of archive authority;

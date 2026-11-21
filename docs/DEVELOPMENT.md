@@ -75,9 +75,10 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 
 | Target | 作用 | 参数 / 条件 | 类别 |
 |---|---|---|---|
-| `pack` | 生成 OMP staging root 与 DSH tarball | 无 | 写 ignored `build/` |
+| `pack` | 生成 OMP staging root、DSH 探针 tarball 与 DSH 等待插件 tarball | 无 | 写 ignored `build/` |
 | `pack-omp` | 只生成 OMP 包 | 无 | 写 ignored `build/` |
 | `pack-dsh` | 只生成 DSH 探针包 | 无 | 写 ignored `build/` |
+| `pack-dsh-agent-wait` | 只生成 DSH subagent 等待插件 `dsh-agent-wait` | 无 | 写 ignored `build/` |
 | `inspect` | 列出 tarball 与内容 | 需先 `make pack`（无产物时报错） | 只读 |
 
 ### 运行门与诊断
@@ -88,6 +89,8 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 |---|---|---|---|
 | `typecheck-host` | Host 入口对 rc.4 公开类型的检查 | `INSTALL_DIR` 必需 | 门；在隔离 install 内建临时 scratch |
 | `host-check` | Host 类型 + 真实 Loader，两者都必须通过 | `INSTALL_DIR` 必需 | 门；在隔离 install 内建临时 scratch |
+| `typecheck-wait-host` | 等待插件的 Host 入口类型检查 | `INSTALL_DIR` 必需 | 门；在隔离 install 内建临时 scratch |
+| `wait-host-check` | 等待插件 Host 类型 + 真实 Loader，两者都必须通过 | `INSTALL_DIR` 必需 | 门；在隔离 install 内建临时 scratch |
 | `profile-check` | DSH profile 启动诊断 | `INSTALL_DIR` 必需 | 门；无 install 即失败 |
 | `isolation-check` | 执行世界隔离必须被观察到 | `INSTALL_DIR` 必需 | 门；无 install 即失败 |
 | `diagnose` | 观察环境实际行为，首行 `OBSERVATION ONLY — not a check` | 有 install 时传 `INSTALL_DIR` | 观察型，恒 0，不下结论 |
@@ -124,8 +127,8 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 | `check` / `docs` / `content` / `git-*` | — | — | — | — | — |
 | `test` / `test-narrow` / `test-watch` | — | — | 写 | — | — |
 | `content-build` | 写（skill 或 staging） | 写（omp/dsh staging） | — | — | — |
-| `pack` / `pack-omp` / `pack-dsh` / `inspect` | — | 写 | — | — | — |
-| Host 门（`typecheck-host`/`host-check`/`profile-check`/`isolation-check`） | — | — | 在 INSTALL_DIR 内建 scratch | — | — |
+| `pack` / `pack-omp` / `pack-dsh` / `pack-dsh-agent-wait` / `inspect` | — | 写 | — | — | — |
+| Host 门（`typecheck-host`/`host-check`/`typecheck-wait-host`/`wait-host-check`/`profile-check`/`isolation-check`） | — | — | 在 INSTALL_DIR 内建 scratch | — | — |
 | `diagnose` | — | — | 在 INSTALL_DIR 内建 scratch（观察型，恒 exit 0，不下结论） | — | — |
 | `install-smoke` | — | — | 写 | — | 写 |
 | `install-omp` | — | — | — | 写 | — |
@@ -136,7 +139,7 @@ skill 产物在 `skills/ensemble/`（提交产物）；omp/dsh 产物在 `build/
 | 变量 | 用法 |
 |---|---|
 | `TARGET` | `skill\|omp\|dsh`，默认 skill；用于 `content`/`content-build` |
-| `INSTALL_DIR` | 指向上面准备的隔离 rc.4 install；Host 门与 `release-check` 必需，`diagnose` 可选 |
+| `INSTALL_DIR` | 指向上面准备的隔离 install；Host 门、`wait-host-check` 与 `release-check` 必需，`diagnose` 可选 |
 | `CONFIRM` | `install-omp` 与 `clean-all` 需取值 `yes` |
 
 含空格目录示例：`make host-check INSTALL_DIR="$dsh_install"`（变量值带空格时加引号即可）。所有示例路径均为可移植占位，具体位置由使用者环境决定。

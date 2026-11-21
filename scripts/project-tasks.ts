@@ -200,6 +200,11 @@ export function doctor(root: string = REPO_ROOT, probe: Probe = defaultProbe): D
     { label: "OMP staging root", path: join(root, "build/pack/omp/staging"), producedBy: "make pack-omp" },
     { label: "OMP tarball", path: join(root, "build/pack/omp"), producedBy: "make pack-omp" },
     { label: "DSH tarball", path: join(root, "build/pack/dsh"), producedBy: "make pack-dsh" },
+    {
+      label: "subagent-wait tarball",
+      path: join(root, "build/pack/dsh-agent-wait"),
+      producedBy: "make pack-dsh-agent-wait",
+    },
   ];
   for (const artifact of artifacts) {
     const present = existsSync(artifact.path);

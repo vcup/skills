@@ -71,13 +71,16 @@ remove it through OMP's plugin manager. See the [OMP guide](adapters/omp/README.
 
 ### DeepSeek Harness
 
-The DSH package is the **Host-only probe** `dsh-ensemble-probe@0.2.0`, built and
-tested against DSH `0.2.2-rc.4` and `0.2.2-rc.5`; `0.2.2-rc.5` is the default
-for a fresh install. It registers the `ensemble` skill as user-invocable and
-one read-only `ensemble_reference` tool. It is not the full ensemble product:
-domain tools, external archive, Client/GUI, and Host/execution-world separation
-are not implemented. Startup output, the isolated-first-run recipe, and the
-evidence behind these claims are in the [DSH adapter guide](adapters/dsh/README.md).
+The DSH package is `dsh-ensemble-probe@0.3.0`, built and tested against DSH
+`0.2.2-rc.4` and `0.2.2-rc.5`; `0.2.2-rc.5` is the default for a fresh install.
+It registers the `ensemble` skill as user-invocable, exposes a read-only
+`ensemble_reference` tool, and ships an **owner-only archive CLI**
+(`ensemble-archive`) plus the `ensembleArchive` Remote it talks to. It is still
+a bounded probe, not the full ensemble product: there are no model-facing write
+tools, no grant/revoke/takeover, no Client/GUI, and no guarantee of physical
+Host/execution-world separation. Startup output, the isolated-first-run recipe,
+the CLI, and the evidence behind these claims are in the
+[DSH adapter guide](adapters/dsh/README.md).
 
 **Prerequisites.** This package supports exactly DSH `0.2.2-rc.4` and
 `0.2.2-rc.5`; `engines.dsh = "0.2.2-rc.4 || 0.2.2-rc.5"` and the
@@ -98,8 +101,8 @@ From this repository, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.2.0
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.3.0.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.3.0
 dsh --profile web                                    # start DSH
 ```
 
@@ -119,11 +122,32 @@ from the directory that holds it, with a path relative to that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.3.0.tgz
 ```
 
 Two messages from `add` are **not** failures: `Agent skills awaiting approval: …`
 and a peer-dependency `WARN`; `add` still exits 0.
+
+### DSH subagent wait plugin
+
+A second, independent DSH package — `dsh-agent-wait@0.1.0` — registers one
+model tool, `wait_subagents`, which blocks the caller's current turn until any
+or all of its subagents change status (or are idle, on request), a deadline
+elapses, or the call is cancelled. It is built and tested against the same two
+releases but declares its **own** supported set; it does not inherit the
+ensemble probe's set. See the [wait plugin guide](adapters/dsh-agent-wait/README.md).
+
+```bash
+make pack-dsh-agent-wait
+dsh plugin --profile web add ./build/pack/dsh-agent-wait/dsh-agent-wait-0.1.0.tgz
+dsh plugin --profile web list            # shows dsh-agent-wait@0.1.0
+```
+
+The wait is in-place: it resolves inside the current tool execution instead of
+ending the turn. It observes, never sends messages or suppresses the host's own
+notifications, so a child finishing mid-wait can still deliver its settlement
+notice and open a later turn. The caller acts on the result (for example with
+`send_message`).
 
 ## Use
 
@@ -152,6 +176,7 @@ other name, path, or symbolic link.
 - [Scout](agents/ensemble-scout.md), [reviewer](agents/ensemble-reviewer.md), and [worker](agents/ensemble-worker.md): OMP-native assignment roles.
 - [OMP adapter](adapters/omp/index.ts): the path-safe `ensemble_state` tool.
 - [DSH adapter](adapters/dsh/README.md): the Host-only rc.4/rc.5 probe and its evidence.
+- [DSH wait plugin](adapters/dsh-agent-wait/README.md): the in-place `wait_subagents` tool.
 - [DSH design](docs/ensemble/README.md): the managed adapter design and its [delivery roadmap](ROADMAP.md).
 
 ## Where to read next

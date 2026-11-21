@@ -22,30 +22,64 @@ verified and added on purpose. See [Version support and upgrade](../../docs/UPGR
 
 ## Owner archive replay (maintainers)
 
-0.2.0 adds a **bounded** owner-only archive surface; it does **not** mean P2 is
+0.3.0 ships a **bounded** owner-only archive surface; it does **not** mean P2 is
 complete. The namespace is `ensembleArchive` on the Typert Remote gateway, with
 four methods — `initialize`, `bind`, `status`, `readBack` — each taking exactly
-one object parameter named `request`. There is **no** `dsh` subcommand and **no**
-Make target for this surface: call it from an authenticated owner Peer through
-the gateway. In-process calls are refused because they have no gateway
-`invocation`. Authority comes from the invocation, never from request fields.
+one object parameter named `request`. There is **no `dsh` subcommand** for the
+archive. From this repository, the Make entry points `archive-owner-help`,
+`archive-owner-status` (credential from `ENSEMBLE_ARCHIVE_COOKIE`), and
+`archive-owner-call` (`ARCHIVE_METHOD` + `ARCHIVE_REQUEST`) drive the packaged
+`ensemble-archive` CLI, each requiring `INSTALL_DIR` (see the [development
+guide](../../docs/DEVELOPMENT.md)). The CLI itself runs on plain Node with **no
+external DSH install** — its client transport is bundled privately in the
+package — and it is the entry to that Remote. It talks to a running Host through
+the Host's client transport from an authenticated owner Peer; the Peer and its
+`owner` principal are assigned by the Host's connection layer from the session
+cookie, never by a request field or by in-process code.
 
-Verified gateway-tier evidence (packed 0.2.0 tgz, real
+CLI shape (also in the installed package README):
+
+```text
+ensemble-archive <status|initialize|bind|readBack> [--url <origin>] [--request <json|@file>] \
+  [--cookie-file|--cookie-stdin|ENSEMBLE_ARCHIVE_COOKIE] [--json]
+```
+
+Credentials are accepted only from a file, stdin, or the
+`ENSEMBLE_ARCHIVE_COOKIE` environment variable. `--cookie <value>` on the
+command line is refused (exit 2) and the value is never echoed. Exit codes:
+`0` success; `1` invalid input / host refusal; `2` usage error; `3` no or empty
+credential; `4` credential rejected by the Host; `5` Host unreachable.
+
+Verified gateway-tier evidence (packed tgz, real
 `TypertGatewayService.invoke`): `initialize` ok (`arch-9bdb9ddae63d74c3`,
-sequence 1); `bind` ok (sequence 2, `binding.canonicalAddress` recorded); a
-stale `bind` returned `revision_conflict`; after a Host restart `status` showed
-the same `headRevision` and `archiveId`; `readBack` returned 277 bytes
-containing `ensemble-archive/v1`. The real Web token/cookie handshake round-trip
-is **still unverified** — gateway authorization is verified, not browser login.
+sequence 1); `bind` ok (sequence 2, canonical address recorded); a stale `bind`
+returned `revision_conflict`; after a Host restart `status` showed the same
+`headRevision` and `archiveId`; `readBack` returned 277 bytes containing
+`ensemble-archive/v1`. The CLI was measured on a live Host for the exit-code
+table above. Transport remains headless HTTP/WebSocket over loopback only:
+**no browser SPA load and no TLS**; HTTPS origins are accepted but TLS and
+`Secure`-cookie branches were read, not run. A non-owner over the transport
+cannot be tested in this release (the principal map has only `owner`); the
+non-owner refusal is proven at the guard level. The `bind` success/refusal
+vectors share the same guard, gateway and CLI path but were not individually
+driven over the transport.
 
-Set `DSH_ENSEMBLE_ARCHIVE_ROOT` in the Host process **before it starts**
-(systemd `Environment=`, shell export, or container env). It is read once in
-`apply()`; changing it later requires a restart. It must be an absolute path
-outside every bound source; the directory may not exist yet and is created on
-first `initialize`. The plugin checks non-overlap after `realpath` and records
-the owner-supplied `worldIdentity` in the binding; whether Host and source are
-in the same execution world is the owner's deployment assertion, **not**
-something the plugin proves.
+Set two variables in the Host process **before it starts** (systemd
+`Environment=`, shell export, or container env); they are read once in
+`apply()`, so changes need a restart:
+
+- `DSH_ENSEMBLE_ARCHIVE_ROOT` — absolute path outside every bound source; may
+  not exist yet and is created on first `initialize`. A relative, empty, or
+  overlapping root is refused.
+- `DSH_ENSEMBLE_ARCHIVE_WORLD` — explicitly chosen by the deployment; never
+  derived from a path or Session cwd.
+
+The plugin validates non-overlap after `realpath` and records the
+owner-supplied `worldIdentity` in the binding; it does **not** prove Host and
+source are in the same execution world. An unproven cross-world source is
+refused (`cross-world source is not supported`, head unchanged); a deployment
+that evidences the world is accepted. That is a real gate, not a plugin proof
+of same-world.
 
 The full user-visible root refusals from the Remote are:
 
@@ -69,7 +103,7 @@ Replay sequence (owner Peer, same archive root throughout):
 rules: `expected_revision` must be the commit id just read; `latest` and `HEAD`
 are refused; `absent` is accepted only by `initialize`; a second `initialize`
 returns `archive_already_initialized`. No grant/revoke/takeover, model write
-tool, or Client/GUI exists in 0.2.0.
+tool, or Client/GUI exists in 0.3.0.
 
 ## Files
 
@@ -87,15 +121,25 @@ tool, or Client/GUI exists in 0.2.0.
 
 ## Package
 
-`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz`
+`scripts/pack-dsh.ts` produces `build/pack/dsh/dsh-ensemble-probe-0.3.0.tgz`
 (git-ignored). The bundled skill text comes from the in-memory
 `build('dsh')` result of `scripts/build-ensemble.ts`; the ignored default
 staging directory is never read, so a stale checkout cannot enter a package.
 
-The staged package holds exactly eleven files:
+The staged package includes the host plugin and skill/reference files, plus
+0.3.0's CLI. The CLI's transport is a **generated** bundle rather than the
+reviewed source: `lib/transport.mjs` imports `@deepseek-ai/cordis` and the client
+entry as bare specifiers, which a Node process started from an installed package
+cannot resolve, so `make dsh-bundle` inlines that four-package closure into one
+file with no bare imports. `make pack` only reads it, and `make check` verifies
+its digest and closure offline:
 
 ```text
-package.json                    dsh.bundle.patch -> ./cordis.patch.yml
+bin/ensemble-archive.js         packaged owner-archive CLI
+lib/transport.bundle.mjs        generated private bundle of the client transport
+lib/transport.bundle.json       its provenance: inputs, versions, digests, externals
+lib/cookie-jar.mjs              session cookie reader
+package.json                    bin, exports, and Host peers (no ordinary dependency)
 cordis.patch.yml                one insert row naming this package
 index.js                        bun-built entry, @deepseek-ai/* left external
 bundle-manifest.json            {target: dsh, files:[{path,sha256,bytes}]}
@@ -136,8 +180,8 @@ From the repository root, every line runs in the same directory:
 
 ```bash
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
-dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.2.0
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.3.0.tgz
+dsh plugin --profile web list                        # shows dsh-ensemble-probe@0.3.0
 dsh --profile web                                    # start DSH
 ```
 
@@ -147,7 +191,7 @@ that directory:
 
 ```bash
 cd <directory-containing-the-tgz>
-dsh plugin --profile web add ./dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web add ./dsh-ensemble-probe-0.3.0.tgz
 ```
 
 `add` prints two lines that are **not** failures — `Agent skills awaiting
@@ -164,7 +208,7 @@ scratch="$(mktemp -d)"
 export DSH_HOME="$scratch/home" npm_config_cache="$scratch/npm-cache" PNPM_HOME="$scratch/pnpm"
 export PATH="<your-rc4-install>/node_modules/.bin:$PATH"   # provides the dsh CLI
 make pack-dsh
-dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.2.0.tgz
+dsh plugin --profile web add ./build/pack/dsh/dsh-ensemble-probe-0.3.0.tgz
 dsh --profile web
 ```
 
@@ -233,7 +277,7 @@ type-checks `index.ts` or `loader-check.ts` without such an install.
 Historical P1 baseline observation in a container-only isolated install
 (published rc.4 packages plus the then-current 0.1.0 probe tarball, with an
 isolated home). The version and support strings in this table are what was
-measured then; current install commands above use 0.2.0 and the explicit
+measured then; current install commands above use 0.3.0 and the explicit
 rc.4/rc.5 set.
 
 | Command | Result |
@@ -306,7 +350,7 @@ Profile boot in a container install is not evidence about a live Host profile.
 
 ## What this is not
 
-0.2.0's owner archive is a bounded first slice, not "P2 complete". Not
+0.3.0's owner archive and CLI are a bounded first slice, not "P2 complete". Not
 implemented and not accepted here: model-facing domain write tools,
 grant/revoke/takeover, the Client/GUI half or settings, model/provider selection
 policy, and any claim that the plugin proves physical Host/execution-world

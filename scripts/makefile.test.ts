@@ -714,6 +714,17 @@ describe("release doors", () => {
     expect(line).toContain("host-check");
   });
 
+  test("the strict door gates every package it builds", async () => {
+    // It packs all three packages, so gating only the ensemble probe would let
+    // the door go green while shipping a wait plugin nobody verified.
+    const makefile = await readMakefile();
+    const line = makefile.split("\n").find((entry) => entry.startsWith("release-check:"));
+    expect(line).toBeDefined();
+    expect(line).toContain("pack");
+    expect(line).toContain("wait-host-check");
+    expect(line).toContain("host-check");
+  });
+
   test("help distinguishes the two doors and marks the strict one", async () => {
     const { stdout } = await make(["help"]);
     const packageLine = stdout.split("\n").find((entry) => entry.trimStart().startsWith("package-check"));
@@ -856,4 +867,162 @@ describe("parallel safety", () => {
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
   }, 120_000);
+});
+
+/**
+ * Read the committed Makefile as data for the wiring assertions below. These do
+ * not run targets that need a real DSH install or a running Host: those are
+ * exercised by the gates themselves, and a unit test that faked them would be
+ * asserting its own stub.
+ */
+async function readMakefile(): Promise<string> {
+  return await readFile(join(REPO_ROOT, "Makefile"), "utf8");
+}
+
+/** Body of one target, up to the next rule. */
+function ruleBody(makefile: string, target: string): string {
+  const lines = makefile.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`${target}:`));
+  if (start === -1) throw new Error(`target not found: ${target}`);
+  const body: string[] = [];
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (index > start && line !== "" && !line.startsWith("\t") && !line.startsWith("#")) break;
+    body.push(line);
+  }
+  return body.join("\n");
+}
+
+describe("third package wiring", () => {
+  test("pack builds all three packages", async () => {
+    const makefile = await readMakefile();
+    const pack = ruleBody(makefile, "pack");
+    expect(pack).toContain("pack-omp");
+    expect(pack).toContain("pack-dsh ");
+    expect(pack).toContain("pack-dsh-agent-wait");
+  });
+
+  test("the wait package target runs the real pack script", async () => {
+    const makefile = await readMakefile();
+    const body = ruleBody(makefile, "pack-dsh-agent-wait");
+    // A wrapper that echoes success instead of packing would be a false door.
+    expect(body).toContain("scripts/pack-dsh-agent-wait.ts");
+    expect(body).not.toMatch(/echo\s+['"]?(packed|ok|success)/i);
+  });
+
+  test("the wait tarball directory is derived, not hardcoded to one version", async () => {
+    const makefile = await readMakefile();
+    expect(makefile).toContain("WAIT_PROBE_DIR");
+    // A version literal here would break the target on the next bump.
+    const body = ruleBody(makefile, "wait-loader-check");
+    expect(body).toMatch(/dsh-agent-wait-\*\.tgz/);
+  });
+
+  test("doctor and inspect cover the third package", async () => {
+    const tasks = await readFile(join(REPO_ROOT, "scripts/project-tasks.ts"), "utf8");
+    expect(tasks).toContain("build/pack/dsh-agent-wait");
+  });
+});
+
+describe("wait Host gates fail closed", () => {
+  test("both gates require an isolated install", async () => {
+    const makefile = await readMakefile();
+    for (const target of ["typecheck-wait-host", "wait-loader-check"]) {
+      expect(ruleBody(makefile, target)).toContain("require-install-dir");
+    }
+    expect(ruleBody(makefile, "wait-host-check")).toContain("typecheck-wait-host");
+    expect(ruleBody(makefile, "wait-host-check")).toContain("wait-loader-check");
+  });
+
+  test("the loader gate refuses a missing package with actionable steps", async () => {
+    const makefile = await readMakefile();
+    const body = ruleBody(makefile, "wait-loader-check");
+    expect(body).toContain("make pack-dsh-agent-wait");
+    expect(body).toContain("no dsh-agent-wait installed");
+    // It must state that nothing was verified rather than implying a pass.
+    expect(body).toContain("Nothing was installed and nothing was verified");
+    // The scratch directory must declare ESM, or Node parses the check as CJS.
+    expect(body).toContain('"type":"module"');
+  });
+
+  test("the wait gates stay out of every offline default", async () => {
+    const makefile = await readMakefile();
+    for (const target of ["check", "test", "package-check", "all"]) {
+      const body = ruleBody(makefile, target);
+      expect(body).not.toContain("wait-host-check");
+      expect(body).not.toContain("typecheck-wait-host");
+    }
+  });
+});
+
+describe("owner archive wrapper", () => {
+  test("the wrapper runs the packaged CLI from the install, not the source tree", async () => {
+    const makefile = await readMakefile();
+    const body = ruleBody(makefile, "archive-owner-help");
+    // bin/ and lib/ import @deepseek-ai/cordis, which only an install provides.
+    expect(body).toContain("node_modules/dsh-ensemble-probe/bin/ensemble-archive.js");
+    expect(body).toContain("require-install-dir");
+  });
+
+  test("no target accepts a credential on the command line", async () => {
+    const makefile = await readMakefile();
+    for (const target of ["archive-owner-help", "archive-owner-status", "archive-owner-call"]) {
+      const body = ruleBody(makefile, target);
+      // The CLI refuses --cookie for a reason; the wrapper must not reintroduce it.
+      expect(body).not.toMatch(/--cookie[^-]/);
+      expect(body).not.toContain("--cookie ");
+    }
+    expect(makefile).toContain("ENSEMBLE_ARCHIVE_COOKIE");
+  });
+
+  test("the wrapper never prints a credential", async () => {
+    const makefile = await readMakefile();
+    for (const target of ["archive-owner-status", "archive-owner-call"]) {
+      const body = ruleBody(makefile, target);
+      expect(body).not.toMatch(/printf[^\n]*\$\$?\{?ENSEMBLE_ARCHIVE_COOKIE/);
+      expect(body).not.toMatch(/echo[^\n]*ENSEMBLE_ARCHIVE_COOKIE/);
+    }
+  });
+
+  test("the endpoints gate their inputs before touching the Host", async () => {
+    const makefile = await readMakefile();
+    const body = ruleBody(makefile, "archive-owner-call");
+    // Both inputs are checked, and each failure names the missing one.
+    expect(body).toContain("ARCHIVE_METHOD is not set");
+    expect(body).toContain("ARCHIVE_REQUEST is not set");
+  });
+
+  test("the CLI's own code is printed, because make returns 2 for any failure", async () => {
+    const makefile = await readMakefile();
+    const body = ruleBody(makefile, "archive-owner-status");
+    // Measured: `make` returns 2 for *any* failing recipe, whatever the child
+    // exited with. The wrapper therefore prints the CLI's real code (3 no
+    // credential, 4 rejected, 5 unreachable) so the distinction survives in the
+    // output. The contract is "printed code + make exit 2", never "make exits 3".
+    expect(body).toContain("archive CLI exit code");
+    expect(body).toMatch(/exit \$\$code/);
+  });
+
+  test("every help line survives the shell, including apostrophes", async () => {
+    // Regression: a single-quoted printf containing a raw ' ends the shell
+    // string and the whole `help` target dies with "unexpected EOF while
+    // looking for matching `''" -- after printing half the list, which looks
+    // like a successful run until the exit code is read.
+    const makefile = await readMakefile();
+    const helpLines = makefile
+      .split("\n")
+      .filter((line) => line.includes("printf") && line.includes("'  %-16s"));
+    expect(helpLines.length).toBeGreaterThan(10);
+    for (const line of helpLines) {
+      const singleQuoted = line.match(/'[^']*'/g) ?? [];
+      expect(singleQuoted.length).toBeGreaterThan(1);
+    }
+  });
+
+  test("archive targets are absent from the offline defaults", async () => {
+    const makefile = await readMakefile();
+    for (const target of ["check", "test", "package-check", "all"]) {
+      expect(ruleBody(makefile, target)).not.toContain("archive-owner");
+    }
+  });
 });

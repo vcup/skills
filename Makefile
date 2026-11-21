@@ -45,6 +45,7 @@ PACK_DIR := $(BUILD_DIR)/pack
 # Where `make pack-dsh` leaves the probe tarball. The name is a glob because the
 # version lives in `adapters/dsh/meta.ts`; restating it here would drift.
 DSH_PROBE_DIR := $(PACK_DIR)/dsh
+WAIT_PROBE_DIR := $(PACK_DIR)/dsh-agent-wait
 VALID_TARGETS := skill omp dsh
 TASKS := $(BUN) scripts/project-tasks.ts
 
@@ -74,9 +75,10 @@ help:
 	@printf '  %-16s %s\n' 'content-build' '[writes] regenerate TARGET from content/ensemble/'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Packages — local artifacts under build/pack, never published'
-	@printf '  %-16s %s\n' 'pack' 'both packages: OMP staging root + DSH tarball'
+	@printf '  %-16s %s\n' 'pack' 'all three packages: OMP staging root + DSH tarball + subagent-wait tarball'
 	@printf '  %-16s %s\n' 'pack-omp' 'OMP package only'
 	@printf '  %-16s %s\n' 'pack-dsh' 'DSH probe tarball only'
+	@printf '  %-16s %s\n' 'pack-dsh-agent-wait' 'DSH subagent-wait plugin tarball only'
 	@printf '  %-16s %s\n' 'inspect' 'list the built tarballs and their contents'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Runtime gates — a *-check target is a gate: it exits 0 only when every'
@@ -84,12 +86,19 @@ help:
 	@printf '  %-16s %s\n' 'host-check' '[needs INSTALL_DIR] gate: Host types + real Loader, both must pass'
 	@printf '  %-16s %s\n' 'profile-check' '[needs INSTALL_DIR] gate: DSH profile boot; missing install is a failure'
 	@printf '  %-16s %s\n' 'isolation-check' '[needs INSTALL_DIR] gate: execution-world confinement must be observed'
+	@printf '  %-16s %s\n' 'typecheck-wait-host' "[needs INSTALL_DIR] gate: the wait plugin's Host entries type-check"
+	@printf '  %-16s %s\n' 'wait-host-check' '[needs INSTALL_DIR] gate: wait Host types + real Loader, both must pass'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Diagnose — observation only, never a gate'
 	@printf '  %-16s %s\n' 'diagnose' '[read-only] observation only: reports what the environment does, asserts nothing, always exits 0'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Upstream — explicit network; never installs, upgrades or widens support'
 	@printf '  %-16s %s\n' 'check-upstream' '[network] read public npm dist-tags and classify them against the supported set'
+	@printf '%s\n' ''
+	@printf '%s\n' 'Owner archive — needs a running Host; not gates and never offline'
+	@printf '  %-16s %s\n' 'archive-owner-help' "[needs INSTALL_DIR] print the packaged archive CLI's own help"
+	@printf '  %-16s %s\n' 'archive-owner-status' '[needs INSTALL_DIR] read-only status; credential from ENSEMBLE_ARCHIVE_COOKIE'
+	@printf '  %-16s %s\n' 'archive-owner-call' '[needs INSTALL_DIR, ARCHIVE_METHOD, ARCHIVE_REQUEST] one endpoint call'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Install — opt-in, outside the default path'
 	@printf '  %-16s %s\n' 'install-omp' '[writes live profile] needs CONFIRM=yes; installs the local OMP staging root'
@@ -102,7 +111,7 @@ help:
 	@printf '%s\n' ''
 	@printf '%s\n' 'Release and cleanup'
 	@printf '  %-16s %s\n' 'package-check' 'offline aggregate: check + test + pack + inspect (no Host gates)'
-	@printf '  %-16s %s\n' 'release-check' '[needs INSTALL_DIR] strict release door: offline gates + Host types + real Loader'
+	@printf '  %-16s %s\n' 'release-check' '[needs INSTALL_DIR] strict release door: offline gates + Host types and real Loader for BOTH plugins'
 	@printf '  %-16s %s\n' 'all' 'alias of package-check: offline chain, Host gates not included'
 	@printf '  %-16s %s\n' 'clean' 'remove only the generated paths this Makefile owns'
 	@printf '  %-16s %s\n' 'clean-all' '[destructive] clean plus node_modules; needs CONFIRM=yes'
@@ -235,6 +244,8 @@ check: require-deps require-python
 	@printf '%s\n' '== check: types (repository + dependency-free DSH modules)'
 	@$(BUN) node_modules/typescript/bin/tsc --noEmit
 	@$(BUN) node_modules/typescript/bin/tsc -p adapters/dsh/tsconfig.json
+	@printf '%s\n' '== check: CLI bundle closure (committed artifact)'
+	@$(BUN) scripts/check-dsh-bundle.ts
 	@printf '%s\n' '== check: documentation references'
 	@$(PYTHON) scripts/check-docs.py
 	@printf '%s\n' '== check: ok (offline; nothing written)'
@@ -294,15 +305,53 @@ content-build: require-target require-deps
 # ---------------------------------------------------------------------------
 # packages
 # ---------------------------------------------------------------------------
-.PHONY: pack pack-omp pack-dsh inspect
+.PHONY: pack pack-omp pack-dsh pack-dsh-agent-wait inspect
 
-pack: pack-omp pack-dsh
+# All three installable roots. Each is an independent package with its own
+# allowlist and README; nothing here publishes or installs any of them.
+pack: pack-omp pack-dsh pack-dsh-agent-wait
 
 pack-omp: require-npm
 	@$(BUN) scripts/pack-omp.ts
 
 pack-dsh: require-npm
 	@$(BUN) scripts/pack-dsh.ts
+
+# The CLI's transport bundle is a committed artifact generated from published
+# package inputs. Packaging only reads it, so `pack` stays offline; regenerating
+# is this explicit target, and it refuses without an install to build from rather
+# than bundling whatever `node_modules` happens to contain.
+.PHONY: dsh-bundle dsh-bundle-check
+
+dsh-bundle: require-bun
+	@test -n "$(DSH_BUNDLE_INSTALL)" || { \
+		printf '%s\n' 'error: dsh-bundle needs the install to build from.' \
+		'  The bundle is generated from published DSH packages, so name the tree:' \
+		'    make dsh-bundle DSH_BUNDLE_INSTALL=<isolated DSH install>' \
+		'  Nothing was built and nothing was written.' >&2; \
+		exit 2; }
+	@$(BUN) scripts/build-dsh-bundle.ts
+
+dsh-bundle-check: require-bun
+	@$(BUN) scripts/check-dsh-bundle.ts
+
+# Dual-release CLI verification: a fresh profile per release, installed by the
+# ordinary `dsh plugin add`, with the packaged bin run under real Node. It needs
+# both isolated installs because the claim is about both; one release is not
+# evidence for the other.
+.PHONY: cli-check
+
+cli-check: require-bun require-node
+	@test -n "$(RC4_INSTALL)" -a -n "$(RC5_INSTALL)" || { \
+		printf '%s\n' 'error: cli-check needs both isolated installs.' \
+		'  The CLI claim covers both supported releases, so both must be named:' \
+		'    make cli-check RC4_INSTALL=<rc.4 install> RC5_INSTALL=<rc.5 install>' \
+		'  Nothing was installed and nothing is claimed.' >&2; \
+		exit 2; }
+	@$(BUN) scripts/verify-dsh-cli.ts --rc4 "$(RC4_INSTALL)" --rc5 "$(RC5_INSTALL)"
+
+pack-dsh-agent-wait: require-npm
+	@$(BUN) scripts/pack-dsh-agent-wait.ts
 
 inspect: require-bun
 	@$(TASKS) inspect
@@ -374,6 +423,117 @@ diagnose: require-bun
 		'  Nothing was observed.' >&2; \
 		exit 2; }
 	@$(BUN) scripts/check-isolation.ts $(if $(INSTALL_DIR),"$(INSTALL_DIR)") --observe
+
+# ---------------------------------------------------------------------------
+# subagent-wait plugin gates
+# ---------------------------------------------------------------------------
+# The wait plugin has its own Host entry, its own tsconfig and its own module
+# set, so its gates are separate programs: a change in one plugin must not be
+# able to loosen the other's gate. Both need a real isolated DSH install, and
+# both refuse without one instead of reporting a partial pass.
+.PHONY: typecheck-wait-host wait-host-check wait-loader-check
+
+typecheck-wait-host: require-bun require-install-dir
+	@printf '  %-16s %s\n' 'typecheck-wait-host' "[needs INSTALL_DIR] gate: the wait plugin's Host entries type-check"
+	@$(BUN) adapters/dsh-agent-wait/typecheck-host.ts "$(INSTALL_DIR)"
+
+# The Loader resolves the packed wait package from INSTALL_DIR, so it must be
+# installed there first. The scratch directory declares module type for the same
+# reason the ensemble gate does: an `npm init -y` install says "commonjs", and
+# the check file uses `import`.
+wait-loader-check: require-node require-install-dir
+	@test -d "$(INSTALL_DIR)/node_modules/dsh-agent-wait" || { \
+		printf '%s\n' "error: no dsh-agent-wait installed in $(INSTALL_DIR)." \
+		'  The Loader resolves the packed wait plugin from that install, so it must' \
+		'  be installed there before this gate can run:' \
+		'    make pack-dsh-agent-wait' \
+		'    cd "'"$(INSTALL_DIR)"'" && npm install --ignore-scripts <this-repo>/$(WAIT_PROBE_DIR)/dsh-agent-wait-*.tgz' \
+		'  Nothing was installed and nothing was verified.' >&2; \
+		exit 2; }
+	@printf '== wait-loader-check: real Loader against %s\n' "$(INSTALL_DIR)"
+	@# One shell: the runtime path is resolved before the `cd` into the scratch
+	@# directory, and the check receives it explicitly. The check composes the
+	@# real minimal native stack and resolves @deepseek-ai/* from that install,
+	@# so it needs the absolute path, not the caller's relative one.
+	@runtime=$$(cd "$(INSTALL_DIR)" 2>/dev/null && pwd) || { \
+		printf '%s\n' "error: INSTALL_DIR is not a usable directory: $(INSTALL_DIR)" \
+		'  Nothing was run and nothing is claimed.' >&2; \
+		exit 2; }; \
+	scratch=$$(mktemp -d "$$runtime/.make-wait-loader.XXXXXX") || exit 2; \
+	trap 'rm -rf "$$scratch"' EXIT HUP INT TERM; \
+	cp adapters/dsh-agent-wait/loader-check.ts "$$scratch/loader-check.ts" || exit 1; \
+	printf '{"type":"module"}\n' > "$$scratch/package.json" || exit 1; \
+	cd "$$scratch" && DSH_WAIT_RUNTIME="$$runtime" DSH_WAIT_PACKAGE=dsh-agent-wait DSH_WAIT_TMP="$$scratch/.probe" $(NODE) loader-check.ts
+
+wait-host-check: typecheck-wait-host wait-loader-check
+
+# ---------------------------------------------------------------------------
+# owner archive CLI
+# ---------------------------------------------------------------------------
+# The owner archive is reachable only from an authenticated owner Peer on a
+# **running** DSH Host, through the packaged `ensemble-archive` CLI. Make adds
+# no protocol and no credential handling: it runs that CLI with a fixed argv.
+#
+# The CLI must run **inside an installation** where `@deepseek-ai/*` resolves
+# (`bin/` and `lib/` import `@deepseek-ai/cordis`). Running it from the source
+# tree fails on module resolution, which is why this wrapper takes the install
+# directory rather than pretending the tree is enough.
+#
+# Not gates: they talk to a live Host and return the CLI's own contract
+# (0 ok, 1 Host refused, 2 usage, 3 no credential, 4 rejected, 5 unreachable).
+# They are deliberately absent from every offline default.
+.PHONY: archive-owner-help archive-owner-status archive-owner-call
+
+# `INSTALL_DIR` must contain the packed probe (the CLI ships in it).
+archive-owner-help: require-node require-install-dir
+	@test -d "$(INSTALL_DIR)/node_modules/dsh-ensemble-probe/bin" || { \
+		printf '%s\n' "error: the owner archive CLI is not installed in $(INSTALL_DIR)." \
+		'  It ships inside the ensemble probe package, so install that first:' \
+		'    make pack-dsh' \
+		'    cd "'"$(INSTALL_DIR)"'" && npm install --ignore-scripts <this-repo>/$(DSH_PROBE_DIR)/dsh-ensemble-probe-*.tgz' \
+		'  Nothing was run and nothing is claimed.' >&2; \
+		exit 2; }
+	@cd "$(INSTALL_DIR)" && $(NODE) node_modules/dsh-ensemble-probe/bin/ensemble-archive.js --help
+
+# Read-only status of the owner archive on the running Host. The session cookie
+# is read by the CLI from ENSEMBLE_ARCHIVE_COOKIE; this wrapper never accepts,
+# forwards, or prints a credential.
+archive-owner-status: require-node require-install-dir
+	@test -d "$(INSTALL_DIR)/node_modules/dsh-ensemble-probe/bin" || { \
+		printf '%s\n' "error: the owner archive CLI is not installed in $(INSTALL_DIR)." \
+		'  Install the probe package there first (make pack-dsh, then npm install).' \
+		'  Nothing was run and nothing is claimed.' >&2; \
+		exit 2; }
+	@cd "$(INSTALL_DIR)" && $(NODE) node_modules/dsh-ensemble-probe/bin/ensemble-archive.js \
+		status $(if $(ARCHIVE_URL),--url "$(ARCHIVE_URL)"); \
+		code=$$?; [ $$code -eq 0 ] || { printf '%s\n' "archive CLI exit code: $$code (0 ok 1 refused 2 usage 3 no credential 4 rejected 5 unreachable)" >&2; exit $$code; }
+
+# One endpoint call. The request document is explicit because the endpoints
+# take different inputs; the method is explicit for the same reason.
+archive-owner-call: require-node require-install-dir
+	@test -n "$(ARCHIVE_METHOD)" || { \
+		printf '%s\n' 'error: ARCHIVE_METHOD is not set.' \
+		'  Choose one of: initialize, bind, readBack (status has its own target).' \
+		'    make archive-owner-call ARCHIVE_METHOD=readBack ARCHIVE_REQUEST=@./request.json' >&2; \
+		exit 2; }
+	@test -n "$(ARCHIVE_REQUEST)" || { \
+		printf '%s\n' 'error: ARCHIVE_REQUEST is not set.' \
+		'  This calls one owner-archive endpoint; it needs the request document:' \
+		'    make archive-owner-call ARCHIVE_METHOD=bind ARCHIVE_REQUEST=@./request.json' \
+		'    make archive-owner-call ARCHIVE_METHOD=bind ARCHIVE_REQUEST='"'"'{"invocation":"..."}'"'"'' \
+		'  Authentication is read by the CLI from ENSEMBLE_ARCHIVE_COOKIE; this' \
+		'  wrapper never accepts, passes, or prints a credential.' >&2; \
+		exit 2; }
+	@test -d "$(INSTALL_DIR)/node_modules/dsh-ensemble-probe/bin" || { \
+		printf '%s\n' "error: the owner archive CLI is not installed in $(INSTALL_DIR)." \
+		'  Install the probe package there first (make pack-dsh, then npm install).' \
+		'  Nothing was run and nothing is claimed.' >&2; \
+		exit 2; }
+	@cd "$(INSTALL_DIR)" && $(NODE) node_modules/dsh-ensemble-probe/bin/ensemble-archive.js \
+		"$(ARCHIVE_METHOD)" \
+		$(if $(ARCHIVE_URL),--url "$(ARCHIVE_URL)") \
+		--request "$(ARCHIVE_REQUEST)" $(if $(ARCHIVE_JSON),--json); \
+		code=$$?; [ $$code -eq 0 ] || { printf '%s\n' "archive CLI exit code: $$code (0 ok 1 refused 2 usage 3 no credential 4 rejected 5 unreachable)" >&2; exit $$code; }
 
 # ---------------------------------------------------------------------------
 # install (opt-in)
@@ -449,10 +609,15 @@ package-check: check test pack inspect
 	@printf '%s\n' '== package-check: ok (offline; Host gates not included)'
 
 # The strict release door. There is deliberately no path through this target
-# that omits the Host gates: without an isolated rc.4 install the Host types and
-# the real Loader cannot be verified, so the door fails instead of going green.
-release-check: require-install-dir check test pack inspect host-check
-	@printf '%s\n' '== release-check: ok (offline gates + Host types + real Loader)'
+# that omits the Host gates: without an isolated install of a tested release the
+# Host types and the real Loader cannot be verified, so the door fails instead of
+# going green.
+#
+# It builds all three packages, so it verifies all three: a door that packed the
+# wait plugin while gating only the ensemble probe would ship an artifact nobody
+# checked. Both gates need their package installed in INSTALL_DIR.
+release-check: require-install-dir check test pack inspect host-check wait-host-check
+	@printf '%s\n' '== release-check: ok (offline gates + both plugins: Host types and real Loaders)'
 	@printf '%s\n' '   Nothing was published, committed, or installed.'
 
 all: package-check

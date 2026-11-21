@@ -35,6 +35,7 @@ from urllib.parse import unquote, urlsplit
 MAINTAINED_FILES = [
     "README.md", "ROADMAP.md",
     "adapters/dsh/README.md", "adapters/dsh/package-readme.md",
+    "adapters/dsh-agent-wait/README.md", "adapters/dsh-agent-wait/package-readme.md",
     "adapters/omp/README.md", "adapters/omp/package/README.md",
 ]
 MAINTAINED_DIRS = ["docs", "skills/ensemble", "skills/always",
@@ -164,9 +165,21 @@ def package_trees(root):
     if not required_dsh.issubset(dsh):
         raise ValueError(f'DSH virtual tree missing required files: {sorted(required_dsh - set(dsh))}')
 
+    # dsh-agent-wait: pack-dsh-agent-wait.ts stages exactly these five files
+    # (README.md + four synthesized). Its installed README links are resolved
+    # against this tree, not against adapters/dsh-agent-wait/.
+    wait = {"README.md": VirtFile(source="adapters/dsh-agent-wait/package-readme.md")}
+    for name in ["bundle-manifest.json", "cordis.patch.yml", "index.js", "package.json"]:
+        wait[name] = VirtFile()
+    required_wait = {"README.md", "bundle-manifest.json", "cordis.patch.yml",
+                     "index.js", "package.json"}
+    if not required_wait.issubset(wait):
+        raise ValueError(f'dsh-agent-wait virtual tree missing required files: {sorted(required_wait - set(wait))}')
+
     return {
         "adapters/omp/package/README.md": (".", omp),
         "adapters/dsh/package-readme.md": (".", dsh),
+        "adapters/dsh-agent-wait/package-readme.md": (".", wait),
     }
 
 
