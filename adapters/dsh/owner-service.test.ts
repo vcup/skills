@@ -42,6 +42,15 @@ const BINDING = {
 const GRANTS = [{ subjectId: "owner", rights: ["manage"] }];
 
 /**
+ * The deployment declaration that evidences one same execution world.
+ *
+ * Both write entries run the same admission, so a case that means to reach the
+ * archive behaviour has to declare the world the source claims. A case that means
+ * to test the *absence* of that evidence deliberately omits it.
+ */
+const SAME_WORLD = { archiveWorldIdentity: BINDING.worldIdentity, sourceWorlds: { [BINDING.worldIdentity]: true } };
+
+/**
  * A context whose invocation is whatever the test says.
  *
  * The scoping methods are inert: these tests never reach the archive, because
@@ -149,7 +158,14 @@ describe("request validation", () => {
   });
 
   test("bind refuses absent, because the archive must already exist", async () => {
-    const outcome = await service.bind({
+    // The deployment declares a proven same world so this case reaches the
+    // revision check rather than being refused earlier by the world check.
+    const serviceWithTopology = createOwnerService({
+      ctx: ownerContext(),
+      archiveRoot: "/nonexistent/archive",
+      topology: { archiveWorldIdentity: BINDING.worldIdentity, sourceWorlds: { [BINDING.worldIdentity]: true } },
+    });
+    const outcome = await serviceWithTopology.bind({
       source_descriptor: BINDING,
       reason: "rebind",
       expected_revision: "absent",
@@ -282,6 +298,7 @@ describe("real archive", () => {
         archiveRoot,
         boundSources: [source],
         factories,
+        topology: SAME_WORLD,
       });
 
       const before = await service.status({});
@@ -321,6 +338,7 @@ describe("real archive", () => {
         archiveRoot,
         boundSources: [source],
         factories,
+        topology: SAME_WORLD,
       });
       const afterRestart = await restarted.status({});
       expect(afterRestart.ok).toBe(true);
@@ -341,7 +359,15 @@ describe("real archive", () => {
     async () => {
       const { Context, factories } = await realFactories();
       const archiveRoot = join(temporaryRoot(), "archive");
-      const service = createOwnerService({ ctx: realOwnerContext(Context), archiveRoot, factories });
+      // `bind` requires a declared topology, because a binding the deployment
+      // has not evidenced as same-world is refused. This test is about the
+      // revision check, so the deployment declares a proven same world.
+      const service = createOwnerService({
+        ctx: realOwnerContext(Context),
+        archiveRoot,
+        factories,
+        topology: { archiveWorldIdentity: BINDING.worldIdentity, sourceWorlds: { [BINDING.worldIdentity]: true } },
+      });
 
       const initialized = await service.initialize({ source_descriptor: BINDING, initial_grants: GRANTS });
       expect(initialized.ok).toBe(true);
@@ -384,11 +410,18 @@ describe("real archive", () => {
         archiveRoot,
         boundSources: [source],
         factories,
+        topology: SAME_WORLD,
       });
 
       const outcome = await service.initialize({ source_descriptor: BINDING, initial_grants: GRANTS });
       expect(outcome.ok).toBe(false);
-      if (!outcome.ok) expect(outcome.reason).toContain("outside every source");
+      if (!outcome.ok) {
+        // Two independent refusals apply here (the root overlaps a bound source,
+        // and the binding's address is not the source). Either is correct; what
+        // must not happen is acceptance.
+        expect(outcome.code).toBe("invalid_input");
+        expect(outcome.reason).toMatch(/outside every source|is inside the archive root|inside the archive root/);
+      }
       // The refusal happened before the root was created.
       expect(existsSync(archiveRoot)).toBe(false);
     },

@@ -62,6 +62,34 @@ export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
 /** DSH packages the plugin shares with its host (shared instances, one copy). */
 export const DSH_PEER_PACKAGES = ["@deepseek-ai/dsh-skill", "@deepseek-ai/dsh-tools"] as const;
 
+/**
+ * The DSH packages the packaged Host entry actually imports.
+ *
+ * Declared because the manifest must name every bare specifier the entry leaves
+ * external. The Host's runtime resolver can fall back to these, but a manifest
+ * that omits one is still wrong: it documents a smaller dependency surface than
+ * the code has, and an installer reading it would not know the plugin needs the
+ * local subprocess/sandbox providers or the Typert protocol.
+ *
+ * The local providers are imported by the plugin itself, because the archive's
+ * isolated group mounts them; `dsh-typert-protocol` is reached through
+ * `dsh-tools`. All four move with the DSH release, so they carry the same
+ * disjunction as `engines.dsh`.
+ *
+ * `@deepseek-ai/dsh-client-connection` is deliberately **not** here. The Host
+ * entry does not import it: the CLI does, and the CLI carries its own private
+ * bundle of that transport. Declaring it as a dependency made pnpm install an
+ * ordinary client package into the profile, which is what shadowed the Host's
+ * own connection.
+ */
+export const DSH_HOST_IMPORT_PACKAGES = [
+  "@deepseek-ai/dsh-skill",
+  "@deepseek-ai/dsh-tools",
+  "@deepseek-ai/dsh-subprocess-local",
+  "@deepseek-ai/dsh-sandbox-local",
+  "@deepseek-ai/dsh-typert-protocol",
+] as const;
+
 /** Every package whose version must agree with the running DSH release. */
 export const DSH_RELEASE_PACKAGES = [DSH_RUNTIME_PACKAGE, ...DSH_PEER_PACKAGES] as const;
 

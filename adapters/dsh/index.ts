@@ -159,6 +159,15 @@ export function applyWith(ctx: Context, options: ApplyOptions): void {
 export { ARCHIVE_ROOT_ENV };
 
 /**
+ * The deployment variable that names the execution world the archive runs in.
+ *
+ * Same-world is a deployment fact, not something a path comparison can infer,
+ * so the deployment states it. `bind` refuses a source whose world it has not
+ * evidenced, rather than assuming one.
+ */
+export const ARCHIVE_WORLD_ENV = "DSH_ENSEMBLE_ARCHIVE_WORLD";
+
+/**
  * Register the skill provider, the reference tool, and the owner archive Remote.
  *
  * The owner surface is built here rather than per call so the isolated
@@ -175,6 +184,16 @@ export function applyWithOwner(
   applyWith(ctx, options);
 
   const archiveRoot = options.owner?.archiveRoot ?? process.env[ARCHIVE_ROOT_ENV] ?? "";
+  // The deployment states which execution world the archive runs in. Without
+  // that statement `bind` has nothing to compare a source against and refuses
+  // it; with it, only a source the deployment evidenced as the same world is
+  // bound. Neither value is derived from a path or from a Session cwd.
+  const world = process.env[ARCHIVE_WORLD_ENV];
+  const topology =
+    options.owner?.topology ??
+    (world === undefined || world.trim() === ""
+      ? undefined
+      : { archiveWorldIdentity: world.trim(), sourceWorlds: { [world.trim()]: true } });
   const service = createOwnerService({
     ctx: ctx as never,
     archiveRoot,
@@ -184,6 +203,7 @@ export function applyWithOwner(
     // them still gets a loaded plugin, and every owner call reports
     // `storage_unavailable` rather than silently writing somewhere else.
     factories: options.owner?.factories ?? localProviderFactories,
+    ...(topology === undefined ? {} : { topology }),
     ...(options.owner ?? {}),
   });
   createOwnerRemote(ctx, service, OWNER_SERVICE_KEY);

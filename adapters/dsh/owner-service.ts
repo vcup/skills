@@ -61,9 +61,11 @@ import {
   validateBinding,
   validateExpectedRevision,
   validateGrants,
+  judgeWorld,
   type Grant,
   type ReceiptRecord,
   type SourceBinding,
+  type TopologyDeclaration,
 } from "./records.ts";
 
 /** The refusal codes the surface returns. */
@@ -108,6 +110,13 @@ export interface OwnerServiceDeps {
   readonly factories?: ProviderFactories;
   /** Renderer identity recorded in metadata. */
   readonly renderer?: string;
+  /**
+   * The deployment's statement about which execution world it runs in.
+   *
+   * Required for `bind`: without it the archive cannot tell whether a source is
+   * in its own world, and an unproven binding is refused rather than enabled.
+   */
+  readonly topology?: TopologyDeclaration;
 }
 
 /** What `initialize` returns. */
@@ -239,9 +248,65 @@ function rejectAssertedIdentity(request: Readonly<Record<string, unknown>>): Ref
   };
 }
 
-/** Resolve the deployment root, or report why it is unusable. */
-function resolveRoot(deps: OwnerServiceDeps): ArchiveRoot | RootRefusal {
-  return validateArchiveRoot(deps.archiveRoot, deps.boundSources ?? []);
+/**
+ * Resolve the deployment root, or report why it is unusable.
+ *
+ * `extraSources` are candidate sources from *this request*, not only the
+ * deployment-configured ones. Without them, a real install — where nothing
+ * configures `boundSources` — would validate the root against an empty list and
+ * accept a root that the source being bound actually overlaps.
+ * @param deps - the surface's environment.
+ * @param extraSources - candidate source paths from the current request.
+ * @returns the validated root, or the refusal.
+ */
+function resolveRoot(deps: OwnerServiceDeps, extraSources: readonly string[] = []): ArchiveRoot | RootRefusal {
+  const sources = [...(deps.boundSources ?? []), ...extraSources];
+  return validateArchiveRoot(deps.archiveRoot, sources);
+}
+
+/**
+ * Admit a source for a write: the same checks for `initialize` and `bind`.
+ *
+ * Both write entry points must run this, and it must use the *candidate* source
+ * from the request. Checking only deployment-configured sources was a real gap:
+ * the real plugin configures none, so the overlap test ran against an empty
+ * list and both entries accepted a source sitting inside the archive root.
+ *
+ * The caller runs this after validating the request's own fields, so an
+ * argument error is reported as an argument error rather than as a deployment
+ * problem: a malformed request never has to be interpreted as an archive-root
+ * refusal.
+ *
+ * Three checks, in order, each with its own reason:
+ * 1. the binding is structurally sound;
+ * 2. the deployment has evidenced the source is in the archive's own world;
+ * 3. the archive root does not overlap the candidate source.
+ * @param binding - the source being bound.
+ * @param deps - the surface's environment.
+ * @returns the validated root, or a refusal.
+ */
+function admitSource(
+  binding: SourceBinding,
+  deps: OwnerServiceDeps,
+): { readonly root: ArchiveRoot } | { readonly ok: false; readonly code: FailureCode; readonly reason: string } {
+  const bindingCheck = validateBinding(binding);
+  if (!bindingCheck.ok) {
+    return { ok: false, code: "invalid_input", reason: bindingCheck.reason };
+  }
+
+  // Same-world is a deployment fact, not a path comparison.
+  const world = judgeWorld(binding, deps.topology);
+  if (world.relation !== "same") {
+    return { ok: false, code: "invalid_input", reason: world.reason };
+  }
+
+  // The candidate source participates in the overlap check, so a source inside
+  // the root (or a root inside the source) is refused at both write entries.
+  const root = resolveRoot(deps, [binding.canonicalAddress]);
+  if (!root.ok) {
+    return { ok: false, code: "invalid_input", reason: `the configured archive root is unusable: ${root.reason}` };
+  }
+  return { root };
 }
 
 /** Count the record files present at one revision. */
@@ -262,6 +327,70 @@ async function countRecords(
 interface TreeFile {
   readonly path: string;
   readonly content: string;
+}
+
+/**
+ * Read every file of a revision back as tree files.
+ *
+ * A commit names a whole tree, so a write that publishes only its own files
+ * silently *deletes* everything it did not mention: after a second `bind` the
+ * head would carry `meta.json` and the newest operation and receipt, and the
+ * earlier ones would be unreachable even though their objects still exist. The
+ * archive's value is that the head is a complete, auditable state, so each write
+ * entry starts from the head it supersedes and layers its own files on top.
+ *
+ * Two fixed commands, both read-only, in the closed set: list the tree, then read
+ * each blob at that revision.
+ * @param group - the isolated services.
+ * @param archiveRoot - the deployment root.
+ * @param revision - the commit whose tree to read.
+ * @returns the files, or the failure.
+ */
+async function readTreeFiles(
+  group: { readonly sandbox: SandboxLike; readonly subprocess: SubprocessLike },
+  archiveRoot: string,
+  revision: string,
+): Promise<{ ok: true; files: TreeFile[] } | { ok: false; code: FailureCode; reason: string }> {
+  const listing = await runGit(group, archiveRoot, { kind: "list-tree", revision, prefix: "" }, { mode: "read-only" });
+  if (listing.exitCode !== 0) {
+    return {
+      ok: false,
+      code: "storage_unavailable",
+      reason: `could not list the archive tree at ${revision}: ${listing.stderr.trim() || "no output"}`,
+    };
+  }
+  const files: TreeFile[] = [];
+  for (const line of listing.stdout.split("\n")) {
+    const path = line.trim();
+    if (path === "") continue;
+    const content = await readAt(group, archiveRoot, revision, path);
+    if (content === null) {
+      return {
+        ok: false,
+        code: "storage_unavailable",
+        reason: `the archive tree at ${revision} lists ${path} but it could not be read`,
+      };
+    }
+    files.push({ path, content });
+  }
+  return { ok: true, files };
+}
+
+/**
+ * Layer this write's files over the tree they supersede.
+ *
+ * Later entries win, so a write replaces `meta.json` and adds its own records
+ * while every file it does not name is carried forward unchanged. The order is
+ * the caller's: base first, then this write's files.
+ * @param base - the files read from the head being superseded.
+ * @param additions - this write's files.
+ * @returns the merged file list, sorted by path for a stable tree.
+ */
+function mergeTreeFiles(base: readonly TreeFile[], additions: readonly TreeFile[]): TreeFile[] {
+  const merged = new Map<string, TreeFile>();
+  for (const file of base) merged.set(file.path, file);
+  for (const file of additions) merged.set(file.path, file);
+  return [...merged.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 /**
@@ -408,20 +537,28 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
   let group: Group | undefined;
   const getGroup = (): Group => (group ??= buildGroup(deps));
 
-  /** A refusal from the shared preamble, or the resolved deployment root. */
-  type Preflight =
-    | { readonly ok: false; readonly code: FailureCode; readonly reason: string }
-    | { readonly root: ArchiveRoot };
-
-  /** Shared preamble: asserted identity, then authorization, then the root. */
-  function preflight(request: Readonly<Record<string, unknown>>, invocation: InvocationLike | undefined): Preflight {
+  /**
+   * Shared authorization preamble: no asserted identity, and an owner Peer.
+   *
+   * The deployment root is deliberately *not* resolved here. `initialize` and
+   * `bind` must validate it against the candidate source from the request, so
+   * resolving it against only the configured sources would be the very gap this
+   * split exists to close.
+   */
+  function preflight(
+    request: Readonly<Record<string, unknown>>,
+    invocation: InvocationLike | undefined,
+  ): Refusal | undefined {
     const identity = rejectAssertedIdentity(request);
     if (identity !== undefined) return identity;
     // The caller supplies the invocation it observed. Falling back to the
     // construction-time context would re-read an object with no invocation and
     // refuse a call the Remote had already authorised.
-    const authorized = authorize(invocation ?? deps.ctx.invocation);
-    if (authorized !== undefined) return authorized;
+    return authorize(invocation ?? deps.ctx.invocation);
+  }
+
+  /** Resolve the root for a read-only call, where no candidate source exists. */
+  function rootForRead(): { readonly root: ArchiveRoot } | Refusal {
     const root = resolveRoot(deps);
     if (!root.ok) {
       return { ok: false, code: "invalid_input", reason: `the configured archive root is unusable: ${root.reason}` };
@@ -431,15 +568,13 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
 
   return {
     async initialize(request, invocation) {
-      const ready = preflight(request, invocation);
-      if (!("root" in ready)) return ready;
+      const denied = preflight(request, invocation);
+      if (denied !== undefined) return denied;
 
       const binding = request.source_descriptor as SourceBinding | undefined;
       if (binding === undefined || typeof binding !== "object") {
         return { ok: false, code: "invalid_input", reason: "source_descriptor is required" };
       }
-      const bindingCheck = validateBinding(binding);
-      if (!bindingCheck.ok) return { ok: false, code: "invalid_input", reason: bindingCheck.reason };
 
       const grants = request.initial_grants as readonly Grant[] | undefined;
       if (!Array.isArray(grants)) {
@@ -460,13 +595,20 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
         };
       }
 
+      // The same admission both write entries use: shape, proven world, and
+      // overlap with this candidate source. `initialize` previously checked only
+      // the binding shape, so it could create an archive whose root overlapped
+      // the source it was binding.
+      const admitted = admitSource(binding, deps);
+      if (!("root" in admitted)) return admitted;
+
       const live = getGroup();
       if (!live.ok) return { ok: false, code: "storage_unavailable", reason: live.reason };
 
-      const created = await ensureBareRepository(live, ready.root.path);
+      const created = await ensureBareRepository(live, admitted.root.path);
       if (!created.ok) return { ok: false, code: "storage_unavailable", reason: created.reason };
 
-      const existing = await readHead(live, ready.root.path);
+      const existing = await readHead(live, admitted.root.path);
       if (existing !== null) {
         return {
           ok: false,
@@ -493,7 +635,7 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
 
       const committed = await commitTree(
         live,
-        ready.root.path,
+        admitted.root.path,
         [
           { path: META_PATH, content: `${canonicalJson(meta)}\n` },
           { path: operationPath(1), content: `${canonicalJson(operation)}\n` },
@@ -510,15 +652,13 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
     },
 
     async bind(request, invocation) {
-      const ready = preflight(request, invocation);
-      if (!("root" in ready)) return ready;
+      const denied = preflight(request, invocation);
+      if (denied !== undefined) return denied;
 
       const binding = request.source_descriptor as SourceBinding | undefined;
       if (binding === undefined || typeof binding !== "object") {
         return { ok: false, code: "invalid_input", reason: "source_descriptor is required" };
       }
-      const bindingCheck = validateBinding(binding);
-      if (!bindingCheck.ok) return { ok: false, code: "invalid_input", reason: bindingCheck.reason };
       if (typeof request.reason !== "string" || request.reason.trim() === "") {
         return { ok: false, code: "invalid_input", reason: "reason is required for bind" };
       }
@@ -529,10 +669,16 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
         return { ok: false, code: "invalid_input", reason: "bind needs an existing revision" };
       }
 
+      // The same admission `initialize` uses: shape, proven world, and overlap
+      // against this candidate source. Checking only configured sources let a
+      // binding through whose source sat inside the archive root.
+      const admitted = admitSource(binding, deps);
+      if (!("root" in admitted)) return admitted;
+
       const live = getGroup();
       if (!live.ok) return { ok: false, code: "storage_unavailable", reason: live.reason };
 
-      const head = await readHead(live, ready.root.path);
+      const head = await readHead(live, admitted.root.path);
       if (head === null) {
         return {
           ok: false,
@@ -548,7 +694,7 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
         };
       }
 
-      const metaText = await readAt(live, ready.root.path, head, META_PATH);
+      const metaText = await readAt(live, admitted.root.path, head, META_PATH);
       if (metaText === null) {
         return { ok: false, code: "storage_unavailable", reason: "the archive head has no meta.json" };
       }
@@ -572,14 +718,20 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
         result: { sequence: nextSequence },
       });
 
+      // Start from the head this bind supersedes, so every earlier operation and
+      // receipt is still published at the new head. Publishing only this call's
+      // files would make the previous ones unreachable.
+      const base = await readTreeFiles(live, admitted.root.path, head);
+      if (!base.ok) return base;
+
       const committed = await commitTree(
         live,
-        ready.root.path,
-        [
+        admitted.root.path,
+        mergeTreeFiles(base.files, [
           { path: META_PATH, content: `${canonicalJson(nextMeta)}\n` },
           { path: operationPath(nextSequence), content: `${canonicalJson(operation)}\n` },
           { path: receiptPath("owner", String(request.operation_id ?? "bind")), content: `${canonicalJson(receipt)}\n` },
-        ],
+        ]),
         { parent: head, message: `bind at sequence ${nextSequence}` },
       );
       if (!committed.ok) return committed;
@@ -588,7 +740,9 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
     },
 
     async status(request, invocation) {
-      const ready = preflight(request, invocation);
+      const denied = preflight(request, invocation);
+      if (denied !== undefined) return denied;
+      const ready = rootForRead();
       if (!("root" in ready)) return ready;
 
       const live = getGroup();
@@ -629,9 +783,10 @@ export function createOwnerService(deps: OwnerServiceDeps): OwnerService {
     },
 
     async readBack(request, invocation) {
-      const ready = preflight(request, invocation);
+      const denied = preflight(request, invocation);
+      if (denied !== undefined) return denied;
+      const ready = rootForRead();
       if (!("root" in ready)) return ready;
-
       const revision = validateExpectedRevision(request.revision, { allowAbsent: false });
       if (!revision.ok) return { ok: false, code: "invalid_input", reason: revision.reason };
       if (revision.expected === null) {

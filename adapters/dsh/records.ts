@@ -201,6 +201,79 @@ export function validateBinding(binding: SourceBinding): { ok: true } | ArchiveR
   return { ok: true };
 }
 
+/**
+ * How a binding's execution world relates to the archive's.
+ *
+ * `same` means the deployment proved both live in one world. `unproven` means
+ * the deployment could not show it. There is deliberately no third state
+ * meaning "assume same": the design refuses an unproven binding rather than
+ * enabling it, because reading a source through the wrong world is exactly the
+ * failure this check exists to prevent.
+ */
+export type WorldRelation = "same" | "unproven";
+
+/**
+ * The deployment's statement about its own topology.
+ *
+ * `archiveWorldIdentity` is how the deployment names the world the archive's
+ * Git actually runs in — a name it chose, not a path string derived from a
+ * Session. `sourceWorlds` maps a source's declared `worldIdentity` to whether
+ * the deployment has evidence that it is the same world as the archive's.
+ *
+ * An absent entry is `unproven`, not `same`: an undeclared source is refused
+ * rather than assumed, so adding a source cannot silently widen coverage.
+ */
+export interface TopologyDeclaration {
+  readonly archiveWorldIdentity: string;
+  readonly sourceWorlds?: Readonly<Record<string, boolean>>;
+}
+
+/**
+ * Decide whether a source may be bound, given the deployment's topology.
+ *
+ * Two independent failures, both refused:
+ * - the source claims a different world than the archive's;
+ * - the deployment has not evidenced that the two worlds are the same.
+ *
+ * Neither a path that contains the other nor a path that does not is evidence:
+ * the design is explicit that same-world is a deployment fact, and that a
+ * string comparison must not stand in for it. So this reads a declaration
+ * rather than inferring from paths.
+ * @param binding - the source being bound.
+ * @param topology - the deployment's declared topology.
+ * @returns `same` only when the deployment proved it; otherwise `unproven` with
+ *   a reason naming which check failed.
+ */
+export function judgeWorld(
+  binding: SourceBinding,
+  topology: TopologyDeclaration | undefined,
+): { readonly relation: "same" } | { readonly relation: "unproven"; readonly reason: string } {
+  if (topology === undefined || topology.archiveWorldIdentity.trim() === "") {
+    return {
+      relation: "unproven",
+      reason:
+        "the deployment has not declared which execution world this archive runs in, so the source's world cannot be compared with it",
+    };
+  }
+  if (binding.worldIdentity !== topology.archiveWorldIdentity) {
+    return {
+      relation: "unproven",
+      reason:
+        `the source declares world ${JSON.stringify(binding.worldIdentity)} but the archive runs in ` +
+        `${JSON.stringify(topology.archiveWorldIdentity)}; a cross-world source is not supported`,
+    };
+  }
+  if (topology.sourceWorlds?.[binding.worldIdentity] !== true) {
+    return {
+      relation: "unproven",
+      reason:
+        `the deployment has not evidenced that ${JSON.stringify(binding.worldIdentity)} is the same execution world as ` +
+        "the archive; refusing to enable this binding on an unproven topology",
+    };
+  }
+  return { relation: "same" };
+}
+
 /** Whether a grant list names at least one subject with at least one right. */
 export function validateGrants(grants: readonly Grant[]): { ok: true } | ArchiveRefusal {
   if (grants.length === 0) {

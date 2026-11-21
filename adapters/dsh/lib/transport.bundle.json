@@ -1,0 +1,35 @@
+{
+  "format": "dsh-cli-bundle/v1",
+  "entry": "adapters/dsh/lib/transport.mjs",
+  "bytes": 113721,
+  "sha256": "5553d072ed48f97a5d2ffa3d11f1c6d30dbf1daad2413ae50df46796d7d8dec2",
+  "inputs": [
+    {
+      "package": "@deepseek-ai/cordis",
+      "version": "4.1.0",
+      "path": "node_modules/@deepseek-ai/cordis/lib/index.js",
+      "sha256": "627409afa06a265f7253200d3bc4648e88805c39fd3768568eb9b9518a31fe8f"
+    },
+    {
+      "package": "@deepseek-ai/cosmokit",
+      "version": "1.9.0",
+      "path": "node_modules/@deepseek-ai/cosmokit/lib/index.js",
+      "sha256": "ba44c0871656e4c7cac2c3c8a2ff644e0d2eb9d6bda7f6355866d686d513268e"
+    },
+    {
+      "package": "@deepseek-ai/dsh-client-connection",
+      "version": "0.2.2-rc.5",
+      "path": "node_modules/@deepseek-ai/dsh-client-connection/lib/client.node.js",
+      "sha256": "62c25782fbdf395d17107933fc4ff18338b0896513740c5fd8305ed5c90bb039"
+    },
+    {
+      "package": "@deepseek-ai/schemastery",
+      "version": "3.19.0",
+      "path": "node_modules/@deepseek-ai/schemastery/lib/index.cjs",
+      "sha256": "aca1c1a47c7b6034feee01501aefca3e6dd97a0bac4fe334fd30647ae5a9e480"
+    }
+  ],
+  "externals": [
+    "node:module"
+  ]
+}

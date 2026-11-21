@@ -69,7 +69,7 @@ const INSTALL = resolveInstall();
  * could not be parsed by the gateway. Testing the source would miss it, so the
  * regression runs against whatever `pack-dsh` produced.
  */
-const TARBALL = join(import.meta.dir, "..", "..", "build", "pack", "dsh", "dsh-ensemble-probe-0.2.0.tgz");
+const TARBALL = join(import.meta.dir, "..", "..", "build", "pack", "dsh", "dsh-ensemble-probe-0.3.0.tgz");
 
 describe("packaged artifact", () => {
   test.skipIf(INSTALL === undefined || INSTALL === "")(
@@ -118,6 +118,11 @@ describe("packaged artifact", () => {
 
       const archiveRoot = join(workspace, "archive");
       process.env.DSH_ENSEMBLE_ARCHIVE_ROOT = archiveRoot;
+      // The deployment states the world it runs in, and evidences the source as
+      // the same one. Both write entries run the same admission, so without this
+      // the packaged `initialize` would be refused — which is the correct
+      // behaviour, not the one this test is about.
+      process.env.DSH_ENSEMBLE_ARCHIVE_WORLD = "host-local";
       pkg.apply(ctx);
 
       const gateway = new TypertGatewayService(ctx);

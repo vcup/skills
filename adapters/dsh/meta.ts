@@ -14,7 +14,12 @@
  * @module adapters/dsh/meta
  */
 
-import { DSH_PEER_RANGE, ENGINES_DSH, SHARED_INSTANCE_PACKAGE } from "./compatibility.ts";
+import {
+  DSH_HOST_IMPORT_PACKAGES,
+  DSH_PEER_RANGE,
+  ENGINES_DSH,
+  SHARED_INSTANCE_PACKAGE,
+} from "./compatibility.ts";
 
 /** Package name of the installable probe bundle. */
 export const PROBE_PACKAGE_NAME = "dsh-ensemble-probe";
@@ -22,15 +27,16 @@ export const PROBE_PACKAGE_NAME = "dsh-ensemble-probe";
 /**
  * Probe version. Independent of the ensemble content version.
  *
- * 0.1.1 added support for `0.2.2-rc.5`; 0.1.0 supported only `0.2.2-rc.4`. A
- * same-version rebuild cannot be distinguished by `dsh plugin list` or an
- * upgrade check, so each capability change ships under a new version.
+ * 0.1.1 added support for `0.2.2-rc.5`; 0.1.0 supported only `0.2.2-rc.4`. 0.2.0
+ * added the owner archive surface and the independent Host-local runner seam.
+ * 0.3.0 adds the `ensemble-archive` CLI, which is what makes that surface
+ * reachable for someone who installed the package: until then the Remote existed
+ * but only a hand-written client could call it.
  *
- * 0.2.0 adds the owner archive surface (`initialize`/`bind`/`status`/`readBack`)
- * and the independent Host-local runner seam. It is still bounded: there is no
- * model-facing domain write, no grant/revoke/takeover, and no Client panel.
+ * Every capability change ships under a new version, because `dsh plugin list`
+ * cannot tell a same-version rebuild apart.
  */
-export const PROBE_VERSION = "0.2.0";
+export const PROBE_VERSION = "0.3.0";
 
 /**
  * The `engines.dsh` range written into the package manifest: the tested set as
@@ -48,14 +54,20 @@ export const PROVIDER_NAME = "ensemble-probe";
 /**
  * Shared-instance DSH packages the probe imports; must match the host's copies.
  *
- * The two DSH packages carry the same disjunction as `engines.dsh` so pnpm
- * dedupes to the host's copy rather than installing a private one; `cordis` is
- * a separate shared instance whose range does not move with the DSH release.
+ * Every package the packaged Host entry imports is listed, each carrying the
+ * same disjunction as `engines.dsh` so pnpm dedupes to the host's copy rather
+ * than installing a private one; `cordis` is a separate shared instance whose
+ * range does not move with the DSH release.
+ *
+ * These stay peers, and `cordis` is *not* promoted to a normal dependency: the
+ * Host supplies all of them through its runtime resolver, and the CLI gets
+ * Cordis from its own private bundle. A normal dependency here would install a
+ * second copy beside the host's, which is the mixed-install shape the whole
+ * compatibility gate exists to refuse.
  */
 export const PEER_DEPENDENCIES: Readonly<Record<string, string>> = {
   [SHARED_INSTANCE_PACKAGE]: "~4.1.0",
-  "@deepseek-ai/dsh-skill": DSH_PEER_RANGE,
-  "@deepseek-ai/dsh-tools": DSH_PEER_RANGE,
+  ...Object.fromEntries(DSH_HOST_IMPORT_PACKAGES.map((name) => [name, DSH_PEER_RANGE])),
 };
 
 /** Bundled skill directory, relative to the installed package root. */
@@ -115,6 +127,8 @@ export const CAPABILITY_STATUS = {
   authorization: "owner-only",
   /** Git runs in the plugin's own isolated local subprocess/sandbox group. */
   hostRunner: "isolated",
+  /** A packaged CLI reaches the Remote over the Host's own client transport. */
+  client: "bin/ensemble-archive",
   /** No model tool acts as owner, and no model domain write exists yet. */
   modelTools: "none",
   /** The product surface is still bounded; see the package README. */

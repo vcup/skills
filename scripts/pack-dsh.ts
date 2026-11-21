@@ -40,6 +40,7 @@ import {
   STAGING_DIR,
 } from "../adapters/dsh/meta.ts";
 import { build, type BuildFile } from "./build-ensemble.ts";
+import { readCommittedBundle, renderBundle, renderProvenance } from "./build-dsh-bundle.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -79,14 +80,22 @@ function sha256(bytes: Uint8Array): string {
  * Every entry is produced by this script or by `build('dsh')`; nothing is
  * discovered by scanning, so an accidental extra file in `adapters/dsh` cannot
  * enter the package.
+ *
+ * The CLI is listed explicitly and the staging step compares this list to what
+ * landed on disk, so forgetting an entry fails the pack instead of shipping a
+ * package whose bin is missing or half-present.
  * @returns the sorted allowlist.
  */
 export function packageAllowlist(): string[] {
   return [
     "README.md",
+    "bin/ensemble-archive.js",
     "bundle-manifest.json",
     "cordis.patch.yml",
     "index.js",
+    "lib/cookie-jar.mjs",
+    "lib/transport.bundle.json",
+    "lib/transport.bundle.mjs",
     "package.json",
     ...REFERENCE_RESOURCES.map((name) => `${SKILL_DIR}/${name}`),
     `${SKILL_DIR}/${SKILL_FILE}`,
@@ -114,20 +123,44 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     version: PROBE_VERSION,
     private: true,
     description:
-      "Host-only DSH probe: user-invocable ensemble skill plus a fixed-enumeration reference reader. " +
-      `Tested against DSH ${supportedVersionsText()}. Not the ensemble product.`,
+      "Host-only DSH probe: user-invocable ensemble skill, a fixed-enumeration reference reader, " +
+      `and an owner-only archive Remote with its CLI. Tested against DSH ${supportedVersionsText()}. ` +
+      "Not the ensemble product.",
     type: "module",
     main: "index.js",
-    files: ["index.js", "cordis.patch.yml", "bundle-manifest.json", "README.md", `${SKILL_DIR}/`],
+    // The CLI is the reason this package has a `bin` at all: the owner archive
+    // Remote is only reachable from an authenticated owner Peer, so without a
+    // client an installer has no way to call it.
+    bin: { "ensemble-archive": "./bin/ensemble-archive.js" },
+    exports: {
+      ".": "./index.js",
+      "./transport": "./lib/transport.mjs",
+      "./cookie": "./lib/cookie-jar.mjs",
+      "./package.json": "./package.json",
+    },
+    files: [
+      "index.js",
+      "cordis.patch.yml",
+      "bundle-manifest.json",
+      "README.md",
+      "bin/",
+      "lib/",
+      `${SKILL_DIR}/`,
+    ],
     engines: { dsh: ENGINES_DSH },
+    // Every package the Host entry imports is a peer, and there is no ordinary
+    // `dependencies` entry at all. That is the point: the Host supplies these
+    // shared instances through its own resolver, and the CLI carries its own
+    // private copy of the client transport in `lib/transport.bundle.mjs`. An
+    // ordinary dependency on the client package is what made pnpm install a
+    // second connection into the profile, shadowing the Host's.
     peerDependencies: { ...PEER_DEPENDENCIES },
     devDependencies: { ...PEER_DEPENDENCIES },
     dsh: { bundle: { patch: "./cordis.patch.yml" } },
     probe: {
       status: "host-only-probe",
       // What this version actually does, stated in the installed manifest so a
-      // reader does not have to infer it from the source. 0.2.0 adds the owner
-      // archive surface and the isolated Host runner; it is still bounded.
+      // reader does not have to infer it from the source.
       capabilities: { ...CAPABILITY_STATUS },
       skill: SKILL_FILE,
       supportedDsh: [...SUPPORTED_DSH_VERSIONS],
@@ -250,6 +283,28 @@ export async function stage(
   const entry = await buildEntry(root);
   await writeFile(join(stagingDir, "index.js"), entry);
   staged.push("index.js");
+
+  // The CLI and its cookie reader are copied verbatim: they are Node ESM already,
+  // and rewriting them would put a build step between the reviewed source and
+  // what an installer runs. The transport is the exception, and the reason is in
+  // `scripts/build-dsh-bundle.ts`: its reviewed source has bare imports a plain
+  // Node process cannot resolve, so the package ships the generated bundle. The
+  // bundle is read through `readCommittedBundle`, which re-checks its digest and
+  // closure, so a hand-edited or stale artifact fails the pack instead of
+  // shipping.
+  const bundle = readCommittedBundle();
+  for (const target of ["bin/ensemble-archive.js", "lib/cookie-jar.mjs"]) {
+    await mkdir(join(stagingDir, dirname(target)), { recursive: true });
+    await copyFile(join(root, "adapters/dsh", target), join(stagingDir, target));
+    staged.push(target);
+  }
+  await mkdir(join(stagingDir, "lib"), { recursive: true });
+  await writeFile(
+    join(stagingDir, "lib", "transport.bundle.mjs"),
+    renderBundle({ code: bundle.code, provenance: bundle.provenance }),
+  );
+  await writeFile(join(stagingDir, "lib", "transport.bundle.json"), renderProvenance(bundle.provenance));
+  staged.push("lib/transport.bundle.mjs", "lib/transport.bundle.json");
 
   const onDisk = (await listFiles(stagingDir)).sort();
   const allowlist = packageAllowlist();

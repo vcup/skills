@@ -28,7 +28,15 @@
  * @module adapters/dsh/archive
  */
 
-import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
@@ -195,47 +203,60 @@ export function buildIsolatedGroup(
 const STRIPPED_ENV_PREFIXES = ["GIT_"] as const;
 
 /**
- * The environment the Git child receives: a fixed allowlist, not a subtraction.
+ * The environment the Git child receives.
  *
- * A subtraction would silently pass any new `GIT_*` variable a future release
- * introduces; an allowlist cannot. `HOME` is pointed inside the archive root so
- * Git cannot read a user's global config, and `GIT_CONFIG_NOSYSTEM` disables the
- * system one.
+ * Order matters, and getting it backwards silently disables the protections.
+ * The subprocess provider builds the child environment by spreading a *copy of
+ * the parent environment* and then this object over it, so:
+ *
+ * 1. every ambient `GIT_*` name is tombstoned with `undefined` — the provider's
+ *    documented removal — because a name we merely omit survives into the child;
+ * 2. only then are the fixed protections written, so a hostile parent that sets
+ *    `GIT_CONFIG_GLOBAL` cannot tombstone our `/dev/null`.
+ *
+ * Doing it the other way round was a real defect: the tombstone loop ran last
+ * and deleted `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_NOSYSTEM`, which let Git fall back
+ * to `$HOME/.gitconfig` — and `HOME` is the archive root, so a user's global
+ * config could influence an archive commit.
+ *
+ * This is a subtraction plus tombstones, not an allowlist: the provider always
+ * merges onto the parent environment, so an allowlist is not achievable without
+ * replacing the provider. The protections below are what make the subtraction
+ * safe.
  * @param archiveRoot - the deployment-owned archive root.
+ * @param parentEnvironment - the environment to mask; defaults to the process's.
  * @returns the child environment.
  */
 export function gitEnvironment(
   archiveRoot: string,
   parentEnvironment: Readonly<Record<string, string | undefined>> = process.env,
 ): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    PATH: "/usr/local/bin:/usr/bin:/bin",
-    HOME: archiveRoot,
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_OPTIONAL_LOCKS: "0",
-    // No transport, no prompts, no pager: this seam never talks to a remote.
-    GIT_ASKPASS: "",
-    GIT_SSH_COMMAND: "",
-    LC_ALL: "C",
-  };
+  const env: Record<string, string | undefined> = {};
 
-  // Tombstone every `GIT_*` name the parent process carries.
-  //
-  // This is not belt-and-braces: the subprocess provider builds the child
-  // environment by spreading a *copy of the parent environment* and then our
-  // entries over it, so a name we merely omit survives into the child. An
-  // ambient `GIT_DIR` would then point the archive's Git at a foreign
-  // repository and the commit would land there instead, which defeats the
-  // whole seam. `undefined` is the provider's documented tombstone: it removes
-  // the entry from the child rather than forwarding it.
-  //
-  // Enumerating the parent instead of listing known names matters, because a
-  // `GIT_*` variable this code has never heard of must not survive either.
+  // 1. Mask every `GIT_*` name the parent carries, including names this code has
+  //    never heard of. `undefined` is the provider's tombstone: it removes the
+  //    entry from the child rather than forwarding it.
   for (const key of Object.keys(parentEnvironment)) {
     if (key.toUpperCase().startsWith("GIT_")) env[key] = undefined;
   }
+
+  // 2. The fixed protections, applied after the mask so they cannot be removed.
+  env.PATH = "/usr/local/bin:/usr/bin:/bin";
+  // HOME inside the archive root: with GIT_CONFIG_GLOBAL=/dev/null below, there
+  // is no user-level config for Git to find even if it looks.
+  env.HOME = archiveRoot;
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_GLOBAL = "/dev/null";
+  // No hooks: a bare repository's hooksPath is never consulted when this is set,
+  // and the template is disabled at `init` so none are installed either.
+  env.GIT_TERMINAL_PROMPT = "0";
+  env.GIT_OPTIONAL_LOCKS = "0";
+  // No transport, no prompts, no pager: this seam never talks to a remote.
+  env.GIT_ASKPASS = "";
+  env.GIT_SSH_COMMAND = "";
+  env.GIT_ALLOW_PROTOCOL = "file";
+  env.LC_ALL = "C";
+
   return env;
 }
 
@@ -328,7 +349,19 @@ export function validateArchiveRoot(
     }
   }
 
-  const canonical = existsSync(resolved) ? realpathSync(resolved) : resolved;
+  // Canonicalise through the deepest existing ancestor, then re-append the
+  // remainder. A root that does not exist yet is the normal first-run case, and
+  // using the raw string there was a real defect: `/outside/link/newarchive`
+  // where `link` points into a source would alias into that source and slip
+  // past the overlap test, because the leaf did not exist to be resolved.
+  const canonical = canonicaliseExisting(resolved);
+  if (canonical === undefined) {
+    return {
+      ok: false,
+      code: "invalid_root",
+      reason: `the archive root ${resolved} cannot be canonicalised: no existing ancestor could be resolved`,
+    };
+  }
   for (const source of sources) {
     const canonicalSource = canonicaliseExisting(source);
     if (canonicalSource === undefined) continue;
@@ -496,7 +529,13 @@ export function gitArgv(command: GitCommand): string[] {
       return ["git", "mktree"];
     case "list-tree": {
       if (!OBJECT_ID.test(command.revision)) throw new SeamUnavailableError("list-tree needs a 40-hex revision");
-      if (command.prefix !== "" && !/^[A-Za-z0-9._-]+$/.test(command.prefix)) {
+      // An empty prefix means "every path". It must not be rendered as an empty
+      // pathspec: `git ls-tree ... -- ""` fails with "empty string is not a valid
+      // pathspec", so the separator is omitted rather than followed by nothing.
+      if (command.prefix === "") {
+        return ["git", "ls-tree", "-r", "--name-only", command.revision];
+      }
+      if (!/^[A-Za-z0-9._-]+$/.test(command.prefix)) {
         throw new SeamUnavailableError(`refusing an unsafe tree prefix: ${JSON.stringify(command.prefix)}`);
       }
       return ["git", "ls-tree", "-r", "--name-only", command.revision, "--", command.prefix];
@@ -609,12 +648,36 @@ function readCollected(stream: CollectedLike | undefined): string {
 }
 
 /**
+ * The marker file that says this directory is an archive this plugin created.
+ *
+ * A bare repository is indistinguishable by shape from any other bare
+ * repository, so `HEAD` alone cannot say "we made this". Without a marker,
+ * pointing the deployment at a user's own bare repository would let the plugin
+ * adopt it and commit into it — the one outcome that could corrupt data the
+ * plugin does not own. The marker is written at creation and required
+ * afterwards.
+ */
+export const OWNERSHIP_MARKER = "ensemble-archive.json";
+
+/**
+ * What the marker records. Deliberately minimal: the identity this plugin
+ * minted, so a mismatch is visible rather than silently migrating.
+ */
+export interface OwnershipRecord {
+  readonly format: string;
+  readonly packageName: string;
+}
+
+/**
  * Create the archive's bare repository if it is not there yet.
  *
- * Idempotent by inspection rather than by a failed command: an existing bare
- * repository is accepted, and a directory that is *not* a bare repository is
- * refused, because initialising over a user's directory is the one outcome that
- * could lose data.
+ * Three cases, and only two are accepted:
+ * - the marker is present: this is our archive, proceed;
+ * - the directory does not exist (or exists and is empty): create it, `git init`
+ *   it, and write the marker;
+ * - anything else — a non-empty directory, or a bare repository without our
+ *   marker — is refused, because adopting a directory the plugin did not create
+ *   is how a user's own repository would get overwritten.
  * @param group - the isolated services.
  * @param archiveRoot - the validated root.
  * @returns the root, or a refusal.
@@ -622,19 +685,61 @@ function readCollected(stream: CollectedLike | undefined): string {
 export async function ensureBareRepository(
   group: { readonly sandbox: SandboxLike; readonly subprocess: SubprocessLike },
   archiveRoot: string,
-): Promise<{ ok: true } | { ok: false; code: "root_not_owned"; reason: string }> {
-  const head = join(archiveRoot, "HEAD");
-  if (existsSync(head)) {
-    return { ok: true };
+): Promise<{ ok: true; created: boolean } | { ok: false; code: "root_not_owned"; reason: string }> {
+  const markerPath = join(archiveRoot, OWNERSHIP_MARKER);
+
+  if (existsSync(markerPath)) {
+    // Our marker: confirm it is structurally ours, so a corrupt file is a refusal
+    // rather than a shrug.
+    try {
+      const record = JSON.parse(readFileSync(markerPath, "utf8")) as Partial<OwnershipRecord>;
+      if (record.format !== "ensemble-archive/v1" || typeof record.packageName !== "string") {
+        return {
+          ok: false,
+          code: "root_not_owned",
+          reason: `${markerPath} is not an archive ownership marker this plugin wrote`,
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        code: "root_not_owned",
+        reason: `${markerPath} cannot be read as an ownership marker: ${(error as Error).message}`,
+      };
+    }
+    return { ok: true, created: false };
   }
+
   if (existsSync(archiveRoot)) {
-    const entries = lstatSync(archiveRoot);
-    if (!entries.isDirectory()) {
+    const stats = lstatSync(archiveRoot);
+    if (!stats.isDirectory()) {
       return { ok: false, code: "root_not_owned", reason: `the archive root ${archiveRoot} exists and is not a directory` };
+    }
+    // An existing bare repository without our marker is exactly the case that
+    // must be refused: it may be the user's, and `HEAD` alone does not say whose.
+    if (existsSync(join(archiveRoot, "HEAD"))) {
+      return {
+        ok: false,
+        code: "root_not_owned",
+        reason:
+          `the archive root ${archiveRoot} is already a Git repository this plugin did not create ` +
+          `(no ${OWNERSHIP_MARKER}); refusing to adopt a repository the deployment did not give this archive`,
+      };
+    }
+    const remaining = readdirSync(archiveRoot);
+    if (remaining.length > 0) {
+      return {
+        ok: false,
+        code: "root_not_owned",
+        reason:
+          `the archive root ${archiveRoot} is not empty and has no ${OWNERSHIP_MARKER}; ` +
+          "refusing to initialise a repository inside a directory this plugin does not own",
+      };
     }
   } else {
     mkdirSync(archiveRoot, { recursive: true });
   }
+
   const result = await runGit(group, archiveRoot, { kind: "init-bare" });
   if (result.exitCode !== 0) {
     return {
@@ -643,5 +748,10 @@ export async function ensureBareRepository(
       reason: `git init --bare failed in ${archiveRoot} (exit ${result.exitCode ?? "?"}): ${result.stderr.trim() || result.stdout.trim() || "no output"}`,
     };
   }
-  return { ok: true };
+
+  // Write the marker only after the repository exists, so a failed init leaves
+  // no marker claiming a repository that is not there.
+  const record: OwnershipRecord = { format: "ensemble-archive/v1", packageName: "dsh-ensemble-probe" };
+  writeFileSync(markerPath, `${JSON.stringify(record, null, 2)}\n`);
+  return { ok: true, created: true };
 }
