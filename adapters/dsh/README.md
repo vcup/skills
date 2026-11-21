@@ -44,6 +44,13 @@ ensemble-archive <status|initialize|bind|readBack> [--url <origin>] [--request <
   [--cookie-file|--cookie-stdin|ENSEMBLE_ARCHIVE_COOKIE] [--json]
 ```
 
+`dsh plugin add` installs that binary into the **profile**, not onto `PATH`:
+`<DSH_HOME>/profiles/<name>/node_modules/.bin/ensemble-archive`. A bare
+`ensemble-archive` therefore fails with exit 127, and `dsh plugin` offers no
+`exec` subcommand to reach it (it forwards to pnpm only). Invoke it by that path
+or put the profile's `.bin` on `PATH` first; `node` must also be on `PATH`, since
+the shebang is `#!/usr/bin/env node`.
+
 Credentials are accepted only from a file, stdin, or the
 `ENSEMBLE_ARCHIVE_COOKIE` environment variable. `--cookie <value>` on the
 command line is refused (exit 2) and the value is never echoed. Exit codes:
@@ -60,9 +67,20 @@ table above. Transport remains headless HTTP/WebSocket over loopback only:
 **no browser SPA load and no TLS**; HTTPS origins are accepted but TLS and
 `Secure`-cookie branches were read, not run. A non-owner over the transport
 cannot be tested in this release (the principal map has only `owner`); the
-non-owner refusal is proven at the guard level. The `bind` success/refusal
-vectors share the same guard, gateway and CLI path but were not individually
-driven over the transport.
+non-owner refusal is proven at the guard level.
+
+Driven over the **real transport** (isolated `DSH_HOME`, real `dsh plugin add`,
+real Host, launch token exchanged by `curl -c`, verbatim `#HttpOnly_` jar, plain
+Node): `status` ok (`archiveInitialized: false`); `initialize` ok
+(`arch-1045f15e3288f6ec`, sequence 1, head `6086dc79…`); `bind` ok (sequence 2,
+head `9777dd53…`, `nativeWorkspaceRef: ws:2` recorded); a stale `bind` returned
+`revision_conflict` (exit 1, "nothing was written"); `readBack` returned
+`meta.json` (311 bytes) **and** `operations/1.json` plus `operations/2.json`, so
+the second `bind` preserved the earlier record at the head; after a Host restart
+the same `headRevision` and `archiveId` were reported with no re-initialize. The
+non-owner refusal and the cross-world refusal remain proven at the guard level
+only — a second authenticated principal and a genuinely different world cannot
+be produced in this environment.
 
 Set two variables in the Host process **before it starts** (systemd
 `Environment=`, shell export, or container env); they are read once in

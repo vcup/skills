@@ -103,7 +103,8 @@ nothing and exits 3.
 
 ### Get a session cookie
 
-Start the web profile, then exchange the launch token it prints for a cookie:
+Start the web profile in one terminal. In a second terminal, using the same
+`DSH_HOME`, exchange the launch token it prints for a cookie:
 
 ```bash
 dsh --profile web --port 3731
@@ -111,24 +112,50 @@ dsh --profile web --port 3731
 curl -c jar.txt "http://127.0.0.1:3731/?token=<launch token>"
 ```
 
-Use the jar directly, or extract one line from it:
+Pass the jar itself with `--cookie-file`; no extraction step is needed. `curl`
+writes an `HttpOnly` cookie as a `#HttpOnly_`-prefixed Netscape line, which the
+CLI reads as a cookie (not a comment), so the jar works verbatim:
 
 ```bash
-awk '/dsh-auth-/ {print $6"="$7}' jar.txt > cookie.txt
+# Use the DSH_HOME chosen for the running Host and its web profile.
+# If DSH_HOME is unset, set it to that Host's actual data directory first.
+: "${DSH_HOME:?Set DSH_HOME to the running Host data directory}"
+ENSEMBLE_ARCHIVE="$DSH_HOME/profiles/web/node_modules/.bin/ensemble-archive"
+"$ENSEMBLE_ARCHIVE" status --cookie-file jar.txt
 ```
+
+A `Cookie:` header line copied from a browser's network panel, or a bare
+`name=value` pair, is also accepted by the same option.
 
 ### Run a command
 
-```bash
-ensemble-archive status --cookie-file cookie.txt
+**The binary is installed into the profile, not onto your `PATH`.**
+`dsh plugin add` puts it in the profile's `node_modules/.bin`, so a bare
+`ensemble-archive` fails with `command not found` (exit 127). There is also no
+`dsh plugin exec` subcommand to reach it through: `dsh plugin` only forwards its
+arguments to pnpm.
 
-ensemble-archive initialize --cookie-file cookie.txt --request @init.json
+Use the `ENSEMBLE_ARCHIVE` path set above
+(`<DSH_HOME>/profiles/web/node_modules/.bin/ensemble-archive`) for subsequent commands.
+
+Or put the profile's `.bin` on `PATH` for the rest of the shell:
+
+```bash
+export PATH="$DSH_HOME/profiles/web/node_modules/.bin:$PATH"
+ensemble-archive status --cookie-file jar.txt
+```
+
+The shebang is `#!/usr/bin/env node`, so `node` must be on `PATH` too. Nothing is
+installed globally and nothing is added to your shell profile by the installer.
+
+```bash
+"$ENSEMBLE_ARCHIVE" initialize --cookie-file jar.txt --request @init.json
 # init.json:
 # { "source_descriptor": { "worldIdentity": "...", "canonicalAddress": "...",
 #                          "nativeWorkspaceRef": "..." },
 #   "initial_grants": [ { "subjectId": "owner", "rights": ["manage"] } ] }
 
-ensemble-archive readBack --cookie-file cookie.txt \
+"$ENSEMBLE_ARCHIVE" readBack --cookie-file jar.txt \
   --request '{"revision":"<40-hex commit>","path":"meta.json"}'
 ```
 
@@ -168,9 +195,11 @@ in shell history and in a process listing. The value is never echoed.
 - **A non-owner cannot be tested on this Host.** This release's principal map
   has exactly one member, `owner`, so "an authenticated non-owner is refused" is
   proven at the guard level, not over the transport.
-- `bind` shares the same guard, gateway, and CLI path as the other three
-  methods, but its own success/refusal vectors were not driven over the
-  transport.
+- `bind` was driven over the transport: a real `bind` advanced the head to
+  sequence 2 and recorded the new `nativeWorkspaceRef`, and a stale `bind` was
+  refused with `revision_conflict` (exit 1, "nothing was written"). The
+  cross-world refusal is proven at the guard level, not over the transport: this
+  environment cannot produce a genuinely different execution world.
 - The archive's Git runs in the plugin's own isolated local
   subprocess/sandbox group, not through the session's execution world.
 
