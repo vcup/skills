@@ -20,6 +20,9 @@
     "scripts/pack-omp.test.ts",
     "scripts/pack-dsh.ts",
     "scripts/pack-dsh.test.ts",
+    "scripts/build-dsh-bundle.ts",
+    "scripts/check-dsh-bundle.ts",
+    "scripts/check-dsh-bundle.test.ts",
     "scripts/check-docs.test.ts",
     "scripts/project-tasks.ts",
     "scripts/project-tasks.test.ts",
@@ -30,6 +33,11 @@
     "scripts/check-isolation.test.ts",
     "adapters/dsh/compatibility.ts",
     "scripts/check-upstream.ts",
-    "scripts/check-upstream.test.ts"
+    "scripts/check-upstream.test.ts",
+    "adapters/dsh-agent-wait/meta.ts",
+    "adapters/dsh-agent-wait/wait.ts",
+    "adapters/dsh-agent-wait/wait.test.ts",
+    "scripts/pack-dsh-agent-wait.ts",
+    "scripts/pack-dsh-agent-wait.test.ts"
   ]
 }
