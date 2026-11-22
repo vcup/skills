@@ -4,7 +4,7 @@
  *
  * This script is independent of `pack-dsh.ts` on purpose: the two plugins ship
  * as separate packages so their lifecycles and manifests cannot tangle. It
- * reuses the single version fact (`adapters/dsh/compatibility.ts`) and the
+ * derives every release claim from this package’s own `meta.ts` and uses the
  * same `tsc`-then-`Bun.build` emit order the ensemble probe uses, because the
  * same two constraints apply:
  *
@@ -22,7 +22,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { relative } from "node:path";
@@ -37,8 +37,8 @@ import {
   STAGING_DIR,
   SUPPORTED_DSH_VERSIONS,
   TOOL_NAME,
+  supportedVersionsText,
 } from "../adapters/dsh-agent-wait/meta.ts";
-import { supportedVersionsText } from "../adapters/dsh/compatibility.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -105,7 +105,11 @@ export function packageManifest(): Record<string, unknown> {
   return {
     name: PACKAGE_NAME,
     version: PACKAGE_VERSION,
-    private: true,
+    repository: {
+      type: "git",
+      url: "git+https://github.com/vcup/skills.git",
+      directory: "adapters/dsh-agent-wait",
+    },
     description:
       "A bounded DSH plugin registering one model tool, `" + TOOL_NAME +
       "`, that waits without ending the caller's turn until subagents in the " +
@@ -119,12 +123,12 @@ export function packageManifest(): Record<string, unknown> {
       "./package.json": "./package.json",
     },
     files: ["index.js", "cordis.patch.yml", "bundle-manifest.json", "README.md"],
-    engines: { dsh: ENGINES_DSH },
+    engines: { node: ">=24.9.0", dsh: ENGINES_DSH },
     peerDependencies: { ...PEER_DEPENDENCIES },
     devDependencies: { ...PEER_DEPENDENCIES },
     dsh: { bundle: { patch: "./cordis.patch.yml" } },
-    probe: {
-      status: "host-only-probe",
+    wait: {
+      status: "local-production-candidate",
       capabilities: { ...CAPABILITY_STATUS },
       tool: TOOL_NAME,
       supportedDsh: [...SUPPORTED_DSH_VERSIONS],
@@ -149,20 +153,20 @@ const FORBIDDEN_TOKENS: readonly RegExp[] = [
  * @param text - file contents.
  */
 export function assertNoCrossPathTokens(path: string, text: string): void {
+  // Repository provenance is metadata, not a dependency on the source checkout.
+  const checked = path === "package.json"
+    ? text.replace('"url": "git+https://github.com/vcup/skills.git"', '"url": "<repository>"')
+    : text;
   for (const token of FORBIDDEN_TOKENS) {
-    if (token.test(text)) fail(`${path}: contains another consumption path's token ${token}`);
+    if (token.test(checked)) fail(`${path}: contains another consumption path's token ${token}`);
   }
 }
 
 /**
  * The modules the packaged entry is emitted from.
  *
- * `index.ts`, `wait.ts`, and `meta.ts` are this plugin's own files;
- * `compatibility.ts` is the single version fact the ensemble probe owns and
- * this plugin reuses instead of restating. They are copied into the scratch
- * with their repository directory structure preserved, because `meta.ts`
- * imports `../dsh/compatibility.ts` and the flat-copy layout would resolve it
- * outside the scratch root.
+ * All runtime modules and release claims belong to this plugin; packaging
+ * does not read another plugin's compatibility module.
  */
 const PACKAGED_MODULES = [
   { source: "index.ts", target: "adapters/dsh-agent-wait/index.ts" },
@@ -199,14 +203,6 @@ async function buildEntry(root: string): Promise<string> {
       await copyFile(join(root, "adapters/dsh-agent-wait", item.source), destination);
       inputs.push(destination);
     }
-    // `compatibility.ts` is read from the ensemble probe's directory, not this
-    // plugin's, because it is that plugin's single version fact.
-    await mkdir(join(scratch, "adapters/dsh"), { recursive: true });
-    await copyFile(
-      join(root, "adapters/dsh", "compatibility.ts"),
-      join(scratch, "adapters/dsh/compatibility.ts"),
-    );
-    inputs.push(join(scratch, "adapters/dsh/compatibility.ts"));
     await writeFile(join(scratch, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
 
     const emitted = Bun.spawnSync(
@@ -229,7 +225,7 @@ async function buildEntry(root: string): Promise<string> {
     }
 
     const bundled = await Bun.build({
-      entrypoints: [join(scratch, "out", "dsh-agent-wait", "index.js")],
+      entrypoints: [join(scratch, "out", "index.js")],
       target: "node",
       format: "esm",
       external: ["@deepseek-ai/*"],
@@ -244,11 +240,11 @@ async function buildEntry(root: string): Promise<string> {
 
     // Bun emits one leading source-map comment per original module with the
     // scratch tmpdir in it; the path differs on every run, which makes the
-    // tarball non-deterministic. Strip exactly those `// ../../tmp/...` lines
+    // tarball non-deterministic. Strip only the generated labels, at any relative/absolute depth,
     // so two packs of identical sources are byte-identical.
     const deterministic = text
       .split("\n")
-      .filter((line) => !/^\/\/\s+\.\.\/.*\/pack-dsh-agent-wait-emit-/.test(line))
+      .filter((line) => !/^\/\/\s+(?:[^\r\n]*\/)?pack-dsh-agent-wait-emit-[^/\r\n]+\/out\/[^\r\n]+$/.test(line))
       .join("\n");
 
     if (/async\s*\[\s*\(/.test(text) || /\[_dec\$?\d*\s*=/.test(text)) {
@@ -272,6 +268,33 @@ async function buildEntry(root: string): Promise<string> {
   }
 }
 
+/** Refuse destructive output mistakes before any build or removal. */
+export async function assertStagingDirectory(root: string, stagingDir: string): Promise<void> {
+  const source = resolve(root);
+  const target = resolve(stagingDir);
+  const within = (parent: string, child: string) => child === parent || child.startsWith(parent + sep);
+  const allowed = join(source, STAGING_DIR);
+  if (within(target, source) || (within(source, target) && !within(allowed, target))) {
+    fail("unsafe staging path: choose this package's build directory or a dedicated external directory");
+  }
+  // Check the target AND ancestors, including parents of a not-yet-created path.
+  for (let path = target; ; path = dirname(path)) {
+    try {
+      const info = await lstat(path);
+      if (info.isSymbolicLink()) fail("unsafe staging path: symlink in output or parent");
+      if (!info.isDirectory()) fail("unsafe staging path: output or parent is not a directory");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (dirname(path) === path) break;
+  }
+  if (!existsSync(target) || (await readdir(target)).length === 0) return;
+  let marker: { package?: unknown };
+  try { marker = JSON.parse(await readFile(join(target, "bundle-manifest.json"), "utf8")); }
+  catch { fail("refusing nonempty staging directory without this package's bundle-manifest.json"); }
+  if (marker.package !== PACKAGE_NAME) fail("refusing nonempty staging directory owned by another package");
+}
+
 /**
  * Stage the package into `build/pack/dsh-agent-wait`.
  *
@@ -283,9 +306,11 @@ async function buildEntry(root: string): Promise<string> {
 export async function stage(
   options: { root?: string; stagingDir?: string } = {},
 ): Promise<StageResult> {
-  const root = options.root ?? REPO_ROOT;
-  const stagingDir = options.stagingDir ?? join(root, STAGING_DIR);
+  const root = resolve(options.root ?? REPO_ROOT);
+  const stagingDir = resolve(options.stagingDir ?? join(root, STAGING_DIR));
 
+  await assertStagingDirectory(root, stagingDir);
+  const entry = await buildEntry(root);
   await rm(stagingDir, { recursive: true, force: true });
   await mkdir(stagingDir, { recursive: true });
 
@@ -308,7 +333,7 @@ export async function stage(
   const bundleManifest = {
     package: PACKAGE_NAME,
     version: PACKAGE_VERSION,
-    engines: { dsh: ENGINES_DSH },
+    engines: { node: ">=24.9.0", dsh: ENGINES_DSH },
     capabilities: { ...CAPABILITY_STATUS },
     supportedDsh: [...SUPPORTED_DSH_VERSIONS],
     defaultDsh: DEFAULT_DSH_VERSION,
@@ -318,7 +343,6 @@ export async function stage(
   await writeFile(join(stagingDir, "bundle-manifest.json"), bundleManifestText);
   staged.push("bundle-manifest.json");
 
-  const entry = await buildEntry(root);
   await writeFile(join(stagingDir, "index.js"), entry);
   staged.push("index.js");
 

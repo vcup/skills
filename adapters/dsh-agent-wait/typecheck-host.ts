@@ -18,11 +18,11 @@
  */
 
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SUPPORTED_DSH_VERSIONS, supportedVersionsText } from "../dsh/compatibility.ts";
+import { SUPPORTED_DSH_VERSIONS, supportedVersionsText } from "./meta.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +32,10 @@ async function main(): Promise<void> {
     console.error("usage: bun adapters/dsh-agent-wait/typecheck-host.ts <isolated-install-dir>");
     process.exit(2);
   }
+  const host = JSON.parse(await readFile(join(installDir, "node_modules/@deepseek-ai/dsh/package.json"), "utf8")) as { version: string };
+  if (!(SUPPORTED_DSH_VERSIONS as readonly string[]).includes(host.version)) {
+    throw new Error(`unsupported DSH ${host.version}; expected ${supportedVersionsText()}`);
+  }
   const tsc = join(installDir, "node_modules/typescript/bin/tsc");
   if (!existsSync(tsc)) {
     console.error(`no typescript at ${tsc}; install one of ${supportedVersionsText()} plus typescript@5.9 and @types/node@24 first`);
@@ -40,14 +44,11 @@ async function main(): Promise<void> {
 
   const scratch = await mkdtemp(join(tmpdir(), "dsh-agent-wait-host-"));
   try {
-    // Mirror the repository layout: meta.ts imports `../dsh/compatibility.ts`,
-    // so both directories must exist relative to the scratch root.
+    // Copy exactly the runtime module closure. No writes to the install.
     await mkdir(join(scratch, "dsh-agent-wait"), { recursive: true });
-    await mkdir(join(scratch, "dsh"), { recursive: true });
     for (const name of ["index.ts", "meta.ts", "wait.ts"]) {
       await copyFile(join(HERE, name), join(scratch, "dsh-agent-wait", name));
     }
-    await copyFile(join(HERE, "..", "dsh", "compatibility.ts"), join(scratch, "dsh", "compatibility.ts"));
     await mkdir(join(scratch, "node_modules"), { recursive: true });
 
     const ln = Bun.spawnSync(
@@ -70,42 +71,21 @@ async function main(): Promise<void> {
       }
     }
 
-    const tsconfig = JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2022",
-          lib: ["ES2022"],
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          strict: true,
-          noImplicitOverride: true,
-          skipLibCheck: true,
-          noEmit: true,
-          allowImportingTsExtensions: true,
-          types: ["node"],
-        },
-        include: ["dsh-agent-wait/index.ts", "dsh-agent-wait/meta.ts", "dsh-agent-wait/wait.ts"],
-      },
-      null,
-      2,
-    );
-    await Bun.write(join(scratch, "tsconfig.host.json"), tsconfig);
+    await copyFile(join(HERE, "tsconfig.host.json"), join(scratch, "dsh-agent-wait/tsconfig.host.json"));
 
     const tscProc = Bun.spawnSync(
-      [process.execPath, tsc, "-p", join(scratch, "tsconfig.host.json")],
+      [process.execPath, tsc, "-p", join(scratch, "dsh-agent-wait/tsconfig.host.json")],
       { cwd: scratch, stdout: "pipe", stderr: "pipe" },
     );
     if (tscProc.exitCode !== 0) {
       console.error(tscProc.stderr.toString() || tscProc.stdout.toString());
       process.exit(1);
     }
-    console.log(`dsh-agent-wait typecheck ok (${supportedVersionsText()})`);
+    console.log(`dsh-agent-wait typecheck ok (actual DSH ${host.version})`);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
 }
-
-void SUPPORTED_DSH_VERSIONS;
 
 if (import.meta.main) {
   await main();

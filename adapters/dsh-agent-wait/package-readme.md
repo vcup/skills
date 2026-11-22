@@ -1,6 +1,7 @@
 # dsh-agent-wait
 
-A **bounded** DeepSeek Harness plugin that registers one model tool,
+Version **1.0.0** is a local production candidate, not an npm publication.
+This DeepSeek Harness plugin registers one model tool,
 `wait_subagents`. It lets a subagent wait for its own subagent tree to change
 without ending its turn — the wait resolves inside the current tool execution
 instead of the agent ending its turn and being woken by a completion notice
@@ -9,6 +10,19 @@ later.
 It is tested against DSH `0.2.2-rc.4` and `0.2.2-rc.5` (`0.2.2-rc.5` is the
 default). It is **not** a coordination product: it observes, it never sends
 messages or makes decisions for you.
+
+## Runtime and platform
+
+Node.js **24.9.0 or newer** is required, matching both supported DSH releases.
+Native acceptance was run on Linux with Node 26.13.1. This plugin's waiting code
+uses Node events and timers, but macOS and Windows have not been validated; no
+cross-platform support claim follows from successful Linux tests. The maintainer's
+native verification command additionally requires a POSIX shell environment and
+GNU-compatible `timeout`.
+
+The package carries repository provenance and has no `private` publication block.
+It remains an unpublished local candidate. Repository licensing has not been
+assigned by this package; no license is invented here.
 
 ## Install
 
@@ -21,8 +35,8 @@ Add the package to a profile that has an app row. `web` is the shipped profile
 and is the safe choice:
 
 ```bash
-dsh plugin --profile web add ./dsh-agent-wait-0.1.0.tgz
-dsh plugin --profile web list      # shows dsh-agent-wait@0.1.0
+dsh plugin --profile web add ./dsh-agent-wait-1.0.0.tgz
+dsh plugin --profile web list      # shows dsh-agent-wait@1.0.0
 dsh --profile web
 ```
 
@@ -120,6 +134,43 @@ because it must not rewrite the host's notification behaviour.
 - The stop-reason vocabulary is the public `@deepseek-ai/dsh-subagent` one
   (`completed`, `aborted`, `error`, `max-tokens`, `refusal`); an unknown future
   reason is reported as `error`, never as success.
+
+## Upgrade from 0.1.0
+
+Use the same profile and homes as the original install, then restart that profile:
+
+```bash
+dsh plugin --profile web add ./dsh-agent-wait-1.0.0.tgz
+dsh plugin --profile web list
+dsh --profile web
+```
+
+The tool name, valid parameters, fixed target selection, latched `change`, explicit
+`idle`, and infinite default remain compatible. Unknown parameters now fail
+explicitly: `timeoutMs` is not an alias for `timeout_ms`. `null` is accepted only
+for `timeout_ms`, not `event` or `condition`.
+
+## Resource limits and cancellation
+
+The tool never truncates a target set or claims a partial `all` success. It returns
+`WAIT_RESOURCE_LIMIT` when a selection exceeds 10,000 targets, a canonical name
+exceeds 1,024 UTF-16 code units, combined names exceed 65,536 code units, or the
+rendered result exceeds 1 MiB. An explicit list above 10,000 entries remains a
+`WAIT_INVALID_TARGETS` error. Select fewer agents to reduce the result.
+
+Discovery accepts at most 50,000 catalog entries and buffers at most 20,000 live
+agent observations; after discovery it retains only selected targets. At most 64
+waits can run concurrently in one loaded plugin. Releasing a wait returns that
+capacity. These limits bound memory, not wait duration: omitted/`null` deadlines
+still allocate no timer and have no implicit timeout. Upstream catalog discovery
+has its own allocation costs before it returns to the plugin.
+
+Caller abort, caller disposal, plugin unload/restart, timeout, and normal completion
+all remove observers and cancel pending discovery. A late read cannot resume a
+settled wait. Reload registers a fresh tool; it does not revive old waits.
+New children created after discovery do not enlarge the fixed target set. In
+`idle` mode a disposed/unavailable member is not `inactive`; cancellation or an
+explicit deadline remains available if that condition cannot be reached.
 
 ## Uninstall
 

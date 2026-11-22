@@ -29,6 +29,7 @@
  * @module adapters/dsh-agent-wait
  */
 
+import { setMaxListeners } from "node:events";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { HarnessError } from "@deepseek-ai/dsh-llm";
@@ -41,7 +42,10 @@ import type {
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { INJECT, TOOL_NAME } from "./meta.ts";
 import {
-  isSatisfied,
+  assertTargetBudget,
+  MAX_ACTIVE_WAITS,
+  MAX_DISCOVERY_ENTRIES,
+  MAX_OBSERVED_AGENTS,
   MAX_TIMER_DELAY_MS,
   narrowStopReason,
   normalizeArguments,
@@ -106,8 +110,14 @@ type WaitRequest = Pick<NormalizedWait, "condition" | "event" | "timeoutMs">;
  * (and therefore self/root refusal cannot be bypassed with an id).
  */
 async function observeTree(ctx: Context, caller: Agent, signal: AbortSignal): Promise<Observation> {
+  signal.throwIfAborted();
   const root = ctx.subagents.rootOf(caller);
   const entries = await ctx.subagents.listDescendants(root.id, signal);
+  // A late read must not access services after timeout/unload.
+  signal.throwIfAborted();
+  if (entries.length > MAX_DISCOVERY_ENTRIES) {
+    throw new WaitArgumentError("subagent catalog exceeds the discovery budget", "WAIT_RESOURCE_LIMIT");
+  }
 
   const byKey = new Map<string, SessionId>();
   const canonicalBySession = new Map<SessionId, string>();
@@ -262,85 +272,10 @@ function resolveTargets(observation: Observation, requested: readonly string[] |
   return resolved;
 }
 
-/** Live status for one Session id, without an observation adapter. */
-function liveStatusOf(ctx: Context, id: SessionId): MemberStatus {
-  return ctx.agents.get(id)?.status === "running" ? "running" : "inactive";
-}
-
 /**
- * Attach the four lifecycle observers. They latch state by Session id:
- *
- * - `lastById[id]` is the most recently observed status;
- * - `changedIds` latches an id the first time its observed status differs from
- *   the previous observation (same-status repeats never latch again);
- * - `stopReasons[id]` records the terminal `subagent/end` reason.
- *
- * The caller must seed `lastById` with every live agent's current status before
- * attaching, so an event that fires during discovery for a *known* member is a
- * real transition relative to that seeded baseline. The first observation of an
- * id with no seeded baseline establishes it without latching a change.
- *
- * `onChange` runs after every state mutation so the wait can re-evaluate
- * satisfaction; it is a no-op when the wait has already settled.
- *
- * @returns a disposer removing all four listeners.
- */
-function attachObservers(
-  ctx: Context,
-  lastById: Map<SessionId, MemberStatus>,
-  changedIds: Set<SessionId>,
-  stopReasons: Map<SessionId, SubagentStopReasonText>,
-  onChange: () => void,
-): () => void {
-  const observe = (id: SessionId, status: MemberStatus): void => {
-    const previous = lastById.get(id);
-    lastById.set(id, status);
-    if (previous !== undefined && previous !== status) changedIds.add(id);
-    onChange();
-  };
-
-  const offStart = ctx.on("subagent/start", (info: SubagentRunInfo) => {
-    observe(info.id, "running");
-  });
-
-  const offEnd = ctx.on("subagent/end", (info: SubagentRunEndInfo) => {
-    stopReasons.set(info.id, narrowStopReason(info.stopReason));
-    // Settlement is terminal for this residency epoch: observe it as inactive.
-    observe(info.id, "inactive");
-  });
-
-  const offStatus = ctx.on("agent/status", (payload: { readonly agent: Agent; readonly status: string }) => {
-    observe(payload.agent.id, payload.status === "running" ? "running" : "inactive");
-  });
-
-  const offDisposed = ctx.on("agent/disposed", (payload: { readonly agent: Agent }) => {
-    // Disposal is its own terminal state, distinct from "inactive": it is a
-    // change even when the last observed status was already inactive.
-    changedIds.add(payload.agent.id);
-    lastById.set(payload.agent.id, "unavailable");
-    onChange();
-  });
-
-  return () => {
-    offStart();
-    offEnd();
-    offStatus();
-    offDisposed();
-  };
-}
-
-/**
- * Run one wait with a single owner for the whole tool call: observers, the
- * abort listeners, the deadline, discovery, and settlement.
- *
- * The observers are attached synchronously first, the deadline starts
- * immediately (from tool start, not from discovery completion), and discovery
- * is then resolved. Every settle path — satisfied, timeout, caller abort, or
- * plugin unload — runs one cleanup that removes the observers, both abort
- * listeners, and the timer. A discovery that ignores its abort signal is
- * fire-and-forget guarded so it neither hangs the call nor becomes an unhandled
- * rejection; it holds no global subscriptions and does not touch the context
- * after settlement.
+ * One owner for discovery, event subscriptions, caller cancellation and deadline.
+ * Before discovery we retain a bounded baseline; afterwards only fixed targets
+ * survive. Events for other trees/targets cannot grow a long-lived wait.
  */
 function waitForChange(
   ctx: Context,
@@ -350,157 +285,118 @@ function waitForChange(
   signal: AbortSignal,
   lifetime: AbortSignal,
 ): Promise<WaitResult> {
-  const lastById = new Map<SessionId, MemberStatus>();
-  const changedIds = new Set<SessionId>();
-  const stopReasons = new Map<SessionId, SubagentStopReasonText>();
-
-  // Seed a baseline for every live agent so an event that fires during
-  // discovery for a *known* member is a real transition relative to it, not a
-  // "first observation" that would swallow an inactive→running that persists.
-  for (const agent of ctx.agents.list()) {
-    lastById.set(agent.id, agent.status === "running" ? "running" : "inactive");
-  }
-
-  // The observers may fire before the Promise executor below defines `check`;
-  // this indirection lets them re-evaluate satisfaction as soon as it exists.
-  let onChange: () => void = () => {};
-  const offObservers = attachObservers(ctx, lastById, changedIds, stopReasons, () => onChange());
-
-  // Start discovery immediately, fused with caller cancellation and plugin
-  // unload. `listDescendants` is the only await; the rest of observeTree is
-  // synchronous once it resolves.
-  const discoverySignal = AbortSignal.any([signal, lifetime]);
-  const discovery = observeTree(ctx, caller, discoverySignal);
-  // A stuck read that later settles is harmless; never let it reject unhandled.
-  void discovery.catch(() => {});
-
   return new Promise<WaitResult>((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let settled = false;
+    const discovery = new AbortController();
+    const lastById = new Map<SessionId, MemberStatus>();
+    const changedIds = new Set<SessionId>();
+    const stopReasons = new Map<SessionId, SubagentStopReasonText>();
+    const ids = new Map<string, SessionId>();
+    let selected: Set<SessionId> | undefined;
+    const satisfiedIds = new Set<SessionId>();
     let targets: readonly string[] = [];
-    const nameById = new Map<string, SessionId>();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const disposers: (() => void)[] = [];
 
     const cleanup = (): void => {
-      if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
-      offObservers();
+      for (const off of disposers.splice(0)) off();
       signal.removeEventListener("abort", onAbort);
       lifetime.removeEventListener("abort", onUnload);
+      // All exits, including deadline and success, release an outstanding read.
+      discovery.abort(new WaitUnavailableError("wait_subagents observation ended"));
+      lastById.clear(); changedIds.clear(); stopReasons.clear(); ids.clear(); selected?.clear(); satisfiedIds.clear();
     };
-
-    const finish = (timedOut: boolean): void => {
-      cleanup();
-      resolve(projectResult(args, targets, snapshotChanged(), snapshotLatest(), snapshotStops(), timedOut));
-    };
-
     const fail = (error: unknown): void => {
-      cleanup();
-      reject(error);
-    };
-
-    /** Name-keyed change set derived from the authoritative id-keyed latches. */
-    const snapshotChanged = (): Set<string> => {
-      const result = new Set<string>();
-      for (const name of targets) {
-        const id = nameById.get(name);
-        if (id !== undefined && changedIds.has(id)) result.add(name);
-      }
-      return result;
-    };
-
-    const snapshotLatest = (): Map<string, MemberStatus> => {
-      const result = new Map<string, MemberStatus>();
-      for (const name of targets) {
-        const id = nameById.get(name);
-        if (id !== undefined) result.set(name, lastById.get(id) ?? "inactive");
-      }
-      return result;
-    };
-
-    const snapshotStops = (): Map<string, SubagentStopReasonText> => {
-      const result = new Map<string, SubagentStopReasonText>();
-      for (const name of targets) {
-        const id = nameById.get(name);
-        const reason = id === undefined ? undefined : stopReasons.get(id);
-        if (reason !== undefined) result.set(name, reason);
-      }
-      return result;
-    };
-
-    const check = (): void => {
       if (settled) return;
-      if (targets.length === 0) return; // discovery not resolved yet
-      if (isSatisfied(args.condition, args.event, targets, snapshotChanged(), snapshotLatest())) {
-        finish(false);
+      cleanup(); reject(error);
+    };
+    const onAbort = (): void => fail(signal.reason);
+    const onUnload = (): void => fail(lifetime.reason ?? new WaitUnavailableError("wait_subagents ended because its plugin was unloaded"));
+    const snapshot = () => {
+      const changed = new Set<string>();
+      const latest = new Map<string, MemberStatus>();
+      const stops = new Map<string, SubagentStopReasonText>();
+      for (const name of targets) {
+        const id = ids.get(name)!;
+        if (changedIds.has(id)) changed.add(name);
+        latest.set(name, lastById.get(id) ?? "inactive");
+        const reason = stopReasons.get(id);
+        if (reason !== undefined) stops.set(name, reason);
       }
+      return { changed, latest, stops };
     };
-
-    // Wire the observers' callback to the check defined here.
-    onChange = check;
-
-    const onAbort = (): void => {
-      // Preserve the caller's exact abort reason, mirroring the built-in
-      // `wait_agent` tool's cancellation contract.
-      fail(signal.reason);
+    const finish = (timedOut: boolean): void => {
+      if (settled) return;
+      try {
+        const { changed, latest, stops } = snapshot();
+        const result = projectResult(args, targets, changed, latest, stops, timedOut);
+        cleanup(); resolve(result);
+      } catch (error) { fail(error); }
     };
-
-    const onUnload = (): void => {
-      fail(new WaitUnavailableError("wait_subagents ended because its plugin was unloaded"));
+    const check = (): void => {
+      if (settled || selected === undefined) return;
+      if (args.condition === "any" ? satisfiedIds.size > 0 : satisfiedIds.size === selected.size) finish(false);
+    };
+    const observe = (id: SessionId, status: MemberStatus, reason?: SubagentStopReasonText): void => {
+      if (settled) return;
+      if (id === caller.id && status === "unavailable") {
+        fail(new WaitUnavailableError("wait_subagents ended because its calling agent was disposed"));
+        return;
+      }
+      if (selected !== undefined && !selected.has(id)) return;
+      if (!lastById.has(id) && lastById.size >= MAX_OBSERVED_AGENTS) {
+        fail(new WaitArgumentError("wait discovery observation budget exceeded", "WAIT_RESOURCE_LIMIT"));
+        return;
+      }
+      const previous = lastById.get(id);
+      lastById.set(id, status);
+      if ((previous !== undefined && previous !== status) || (previous === undefined && status === "unavailable")) changedIds.add(id);
+      // A resumed run must never report a previous run's terminal reason.
+      if (status === "running") stopReasons.delete(id);
+      if (reason !== undefined) stopReasons.set(id, reason);
+      if (selected !== undefined) {
+        const satisfied = args.event === "change" ? changedIds.has(id) : status === "inactive";
+        if (satisfied) satisfiedIds.add(id); else satisfiedIds.delete(id);
+      }
+      // Same-state repeats may enrich stopReason but cannot satisfy a change.
+      if (previous !== status) check();
     };
 
     signal.addEventListener("abort", onAbort, { once: true });
     lifetime.addEventListener("abort", onUnload, { once: true });
-
-    // Deadline runs from tool start, covering discovery too.
-    if (args.timeoutMs !== undefined) {
-      timer = setTimeout(() => {
-        finish(true);
-      }, args.timeoutMs);
-    }
-
-    discovery.then(
-      (observation) => {
+    if (lifetime.aborted) { onUnload(); return; }
+    if (signal.aborted) { onAbort(); return; }
+    if (args.timeoutMs !== undefined) timer = setTimeout(() => finish(true), args.timeoutMs);
+    try {
+      // Synchronous seed+subscribe has no await gap; discovery begins only after
+      // subscriptions and abort handlers are owned by this call.
+      for (const agent of ctx.agents.list()) {
+        if (lastById.size >= MAX_OBSERVED_AGENTS) throw new WaitArgumentError("live agent baseline exceeds the observation budget", "WAIT_RESOURCE_LIMIT");
+        lastById.set(agent.id, agent.status === "running" ? "running" : "inactive");
+      }
+      disposers.push(ctx.on("subagent/start", (info: SubagentRunInfo) => observe(info.id, "running")));
+      disposers.push(ctx.on("subagent/end", (info: SubagentRunEndInfo) => observe(info.id, "inactive", narrowStopReason(info.stopReason))));
+      disposers.push(ctx.on("agent/status", ({ agent, status }: { agent: Agent; status: string }) => observe(agent.id, status === "running" ? "running" : "inactive")));
+      disposers.push(ctx.on("agent/disposed", ({ agent }: { agent: Agent }) => observe(agent.id, "unavailable")));
+      void observeTree(ctx, caller, discovery.signal).then(observation => {
         if (settled) return;
-        try {
-          targets = resolveTargets(observation, requested);
-        } catch (error) {
-          fail(error);
-          return;
-        }
+        targets = resolveTargets(observation, requested);
+        assertTargetBudget(targets);
+        selected = new Set();
         for (const name of targets) {
-          const id = observation.idOf(name);
-          if (id === undefined) continue;
-          nameById.set(name, id);
-          if (!lastById.has(id)) {
-            // Only reachable for ids that were not live at seed time (e.g. a
-            // short-lived member that already settled). Baseline on first read;
-            // any observed transition is already latched in changedIds.
-            const member = observation.memberOf(name);
-            lastById.set(id, member?.status ?? liveStatusOf(ctx, id));
-          }
+          const member = observation.memberOf(name)!;
+          ids.set(name, member.id); selected.add(member.id);
+          if (!lastById.has(member.id)) lastById.set(member.id, member.status);
+          if (args.event === "change" ? changedIds.has(member.id) : lastById.get(member.id) === "inactive") satisfiedIds.add(member.id);
         }
-        // Re-check cancellation after discovery: an abort or unload that landed
-        // while discovery was in flight must settle now, not after a wait.
-        if (lifetime.aborted) {
-          onUnload();
-        } else if (signal.aborted) {
-          onAbort();
-        } else {
-          check();
+        for (const id of lastById.keys()) if (!selected.has(id)) {
+          lastById.delete(id); changedIds.delete(id); stopReasons.delete(id);
         }
-      },
-      (error) => {
-        if (settled) return;
-        if (lifetime.aborted) {
-          onUnload();
-        } else if (signal.aborted) {
-          onAbort();
-        } else {
-          fail(error);
-        }
-      },
-    );
+        check();
+      }).catch(fail);
+    } catch (error) { fail(error); }
   });
 }
 
@@ -513,6 +409,8 @@ function waitForChange(
  */
 export function apply(ctx: Context): void {
   const lifetime = new AbortController();
+  setMaxListeners(MAX_ACTIVE_WAITS + 1, lifetime.signal);
+  let activeWaits = 0;
   ctx.effect(() => () => {
     lifetime.abort(new WaitUnavailableError("wait_subagents ended because its plugin was unloaded"));
   }, "agent-wait.waits()");
@@ -591,21 +489,32 @@ export function apply(ctx: Context): void {
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
       },
       async execute(args, exec): Promise<WaitResult> {
-        if (exec.agent === undefined) {
-          throw new WaitUnavailableError("wait_subagents requires a calling agent (exec.agent was undefined)");
+        try {
+          if (exec.agent === undefined) {
+            throw new WaitUnavailableError("wait_subagents requires a calling agent (exec.agent was undefined)");
+          }
+          if (lifetime.signal.aborted) {
+            throw new WaitUnavailableError("wait_subagents ended because its plugin was unloaded");
+          }
+          const normalized = normalizeArguments(args);
+          if (activeWaits >= MAX_ACTIVE_WAITS) {
+            throw new WaitArgumentError("too many concurrent waits in this plugin; cancel an existing wait first", "WAIT_RESOURCE_LIMIT");
+          }
+          activeWaits++;
+          try { return await waitForChange(
+            ctx,
+            exec.agent,
+            normalized.targetNames,
+            { condition: normalized.condition, event: normalized.event, timeoutMs: normalized.timeoutMs },
+            exec.signal,
+            lifetime.signal,
+          ); } finally { activeWaits--; }
+        } catch (error) {
+          // The dependency-free validator carries codes, but native ToolRunner
+          // preserves structured codes only for the shared HarnessError class.
+          if (error instanceof WaitArgumentError) throw new HarnessError(error.message, error.code, { cause: error });
+          throw error;
         }
-        if (lifetime.signal.aborted) {
-          throw new WaitUnavailableError("wait_subagents ended because its plugin was unloaded");
-        }
-        const normalized = normalizeArguments(args as never);
-        return await waitForChange(
-          ctx,
-          exec.agent,
-          normalized.targetNames,
-          { condition: normalized.condition, event: normalized.event, timeoutMs: normalized.timeoutMs },
-          exec.signal,
-          lifetime.signal,
-        );
       },
     }),
   );

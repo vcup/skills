@@ -81,7 +81,21 @@ export const ROOT_NAME = "lead";
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** Upper bound for a safe target selection, matching a real tree's ceiling. */
-const MAX_TARGETS = 10_000;
+export const MAX_TARGETS = 10_000;
+/** Bound strings and rendered output without silently truncating an all wait. */
+export const MAX_NAME_LENGTH = 1_024;
+export const MAX_TOTAL_NAME_LENGTH = 65_536;
+export const MAX_RESULT_BYTES = 1_048_576;
+export const MAX_OBSERVED_AGENTS = 20_000;
+export const MAX_DISCOVERY_ENTRIES = 50_000;
+export const MAX_ACTIVE_WAITS = 64;
+
+export function assertTargetBudget(names: readonly string[]): void {
+  if (names.length > MAX_TARGETS || names.some(name => name.length > MAX_NAME_LENGTH)
+      || names.reduce((total, name) => total + name.length, 0) > MAX_TOTAL_NAME_LENGTH) {
+    throw new WaitArgumentError("wait selection exceeds the target/name budget; select fewer agents explicitly", "WAIT_RESOURCE_LIMIT");
+  }
+}
 
 /**
  * Validate and normalize the model-facing arguments.
@@ -97,13 +111,22 @@ const MAX_TARGETS = 10_000;
  * @returns the normalized form.
  * @throws WaitArgumentError with a stable code on any violation.
  */
-export function normalizeArguments(args: WaitArguments): NormalizedWait {
-  const event = args.event ?? "change";
+export function normalizeArguments(raw: unknown): NormalizedWait {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new WaitArgumentError("wait arguments must be an object", "WAIT_INVALID_ARGUMENTS");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!["agents", "event", "condition", "timeout_ms"].includes(key)) {
+      throw new WaitArgumentError("unknown wait argument; allowed: agents, event, condition, timeout_ms", "WAIT_INVALID_ARGUMENTS");
+    }
+  }
+  const args = raw as WaitArguments;
+  const event = args.event === undefined ? "change" : args.event;
   if (event !== "change" && event !== "idle") {
     throw new WaitArgumentError("event must be \"change\" or \"idle\"", "WAIT_INVALID_EVENT");
   }
 
-  const condition = args.condition ?? "any";
+  const condition = args.condition === undefined ? "any" : args.condition;
   if (condition !== "any" && condition !== "all") {
     throw new WaitArgumentError("condition must be \"any\" or \"all\"", "WAIT_INVALID_CONDITION");
   }
@@ -131,12 +154,14 @@ export function normalizeArguments(args: WaitArguments): NormalizedWait {
         );
       }
       const key = name.trim();
+      if (key.length > MAX_NAME_LENGTH) throw new WaitArgumentError("agent name exceeds the length budget", "WAIT_RESOURCE_LIMIT");
       if (seen.has(key)) {
         throw new WaitArgumentError(`duplicate agent name: ${JSON.stringify(key)}`, "WAIT_INVALID_TARGETS");
       }
       seen.add(key);
     }
     targetNames = [...seen];
+    assertTargetBudget(targetNames);
   }
 
   let timeoutMs: number | undefined;
@@ -258,7 +283,7 @@ export function projectResult(
     const stopReason = stopReasons.get(name);
     return stopReason === undefined ? { name, status } : { name, status, stopReason };
   });
-  return {
+  const result = {
     condition: args.condition,
     event: args.event,
     timedOut,
@@ -266,6 +291,10 @@ export function projectResult(
     changed: changedList,
     members,
   };
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_RESULT_BYTES) {
+    throw new WaitArgumentError("wait result exceeds the output budget; select fewer agents explicitly", "WAIT_RESOURCE_LIMIT");
+  }
+  return result;
 }
 
 /** The tool name this module's semantics describe. */

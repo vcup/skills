@@ -25,9 +25,9 @@
  * this package and the `wait_subagents` tool is registered and reachable, and a
  * call without a live calling agent is refused with the plugin's own
  * `WAIT_UNAVAILABLE` guard. It does **not** run a real subagent start/end pair
- * (that needs a deterministic LLM adapter and a subagent provider, which the
- * independent runtime reviewer exercises against the packed tgz); this file is
- * the scoped gate, not the whole acceptance.
+ * (the maintained scripts/verify-dsh-wait.ts gate covers that with a deterministic
+ * LLM adapter and real subagent provider); this remains the scoped registration
+ * gate, not the whole native acceptance.
  *
  * Every check prints `PASS <name>` or `FAIL <name>: <detail>`; the process exits
  * 1 if any check failed.

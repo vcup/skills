@@ -10,14 +10,12 @@
  * The supported DSH release set is **this plugin's own decision**, not the
  * ensemble probe's. Each plugin exercises its own matrix and may widen or drop
  * releases independently; borrowing the ensemble's array would make a future
- * ensemble-only change silently move this plugin's `engines.dsh`. The only
- * thing shared with the ensemble probe is the pure constant name of the cordis
- * shared instance, which is not a release decision.
+ * ensemble-only change silently move this plugin's `engines.dsh`. Shared
+ * runtime package identifiers carry no coupling to another plugin.
  *
  * @module adapters/dsh-agent-wait/meta
  */
 
-import { SHARED_INSTANCE_PACKAGE } from "../dsh/compatibility.ts";
 
 /** Package name of the installable subagent-wait bundle. */
 export const PACKAGE_NAME = "dsh-agent-wait";
@@ -28,7 +26,7 @@ export const PACKAGE_NAME = "dsh-agent-wait";
  * A capability change must ship under a new version: `dsh plugin list` cannot
  * tell a same-version rebuild apart.
  */
-export const PACKAGE_VERSION = "0.1.0";
+export const PACKAGE_VERSION = "1.0.0";
 
 /** Plugin name registered in the Cordis bundle. */
 export const PLUGIN_NAME = "agent-wait";
@@ -77,15 +75,16 @@ export const DSH_PEER_RANGE: string = ENGINES_DSH;
 /**
  * Shared-instance DSH packages the plugin imports; must match the host's copies.
  *
- * `subagents` (the seam), `agent` (live status/disposal), and `tools` (tool
- * definition + exec context) are the packages the implementation reads. They
+ * `subagents` (the seam), `agent` (live status/disposal), `llm` (HarnessError)
+ * and `tools` (tool definition + exec context) are the imported packages. They
  * carry the same disjunction as `engines.dsh` so pnpm dedupes to the host's
  * copy; `cordis` is a separate shared instance whose range does not move with
  * the DSH release.
  */
 export const PEER_DEPENDENCIES: Readonly<Record<string, string>> = {
-  [SHARED_INSTANCE_PACKAGE]: "~4.1.0",
+  "@deepseek-ai/cordis": "~4.1.0",
   "@deepseek-ai/dsh-agent": DSH_PEER_RANGE,
+  "@deepseek-ai/dsh-llm": DSH_PEER_RANGE,
   "@deepseek-ai/dsh-subagent": DSH_PEER_RANGE,
   "@deepseek-ai/dsh-tools": DSH_PEER_RANGE,
 };
@@ -96,16 +95,19 @@ export const PEER_DEPENDENCIES: Readonly<Record<string, string>> = {
  * `authorization` names the only trust surface: this plugin performs no
  * writes and no authority checks of its own, and reads only the caller's own
  * subagent tree, so it has no owner surface. `modelTools` records the single
- * model-facing tool. `lifecycle` stays `bounded` because the plugin never
- * claims to be a complete coordination product.
+ * model-facing tool. `lifecycle` is `wait-only`: version 1.0 does not claim
+ * a complete coordination product.
  */
 export const CAPABILITY_STATUS = {
   authorization: "caller-tree-only",
   hostRunner: "none",
   client: "none",
   modelTools: TOOL_NAME,
-  lifecycle: "bounded",
+  lifecycle: "wait-only",
 } as const;
 
 /** Staging directory of the packaged artifact, relative to the repository root. */
 export const STAGING_DIR = "build/pack/dsh-agent-wait";
+
+/** Human-readable release list, derived only from this package’s matrix. */
+export function supportedVersionsText(): string { return SUPPORTED_DSH_VERSIONS.join(" and "); }

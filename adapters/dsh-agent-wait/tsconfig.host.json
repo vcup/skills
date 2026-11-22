@@ -1,6 +1,6 @@
 {
   "//": "Type check for the Host entry modules that import @deepseek-ai/*: index.ts. The dependency-free siblings (meta.ts, wait.ts) are checked by the root typecheck; this project runs against a real isolated DSH install, not the repository's root dependencies.",
-  "//usage": "bun adapters/dsh-agent-wait/typecheck-host.ts <isolated-install-dir> — copies this file beside that install and runs its tsc.",
+  "//usage": "bun adapters/dsh-agent-wait/typecheck-host.ts <isolated-install-dir> — copies the modules and this config into a fresh temporary directory, links read-only host types, and runs the install’s tsc.",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],

@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   isSatisfied,
   MAX_TIMER_DELAY_MS,
+  MAX_TARGETS,
+  MAX_NAME_LENGTH,
+  MAX_RESULT_BYTES,
   narrowStopReason,
   normalizeArguments,
   projectResult,
@@ -27,6 +30,14 @@ describe("normalizeArguments", () => {
 
   test("accepts null timeout as unbounded", () => {
     expect(normalizeArguments({ timeout_ms: null })).toMatchObject({ timeoutMs: undefined });
+  });
+
+  test("rejects unknown options instead of silently creating an infinite wait", () => {
+    expect(() => normalizeArguments({ timeoutMs: 1 } as never)).toThrow(WaitArgumentError);
+    expect(() => normalizeArguments({ event: null } as never)).toThrow(WaitArgumentError);
+    for (const value of [null, [], false, "", 12]) {
+      expect(() => normalizeArguments(value as never)).toThrow(WaitArgumentError);
+    }
   });
 
   test("rejects duplicate target names", () => {
@@ -129,4 +140,18 @@ describe("projectResult", () => {
     expect(result.satisfiedBy).toEqual([]);
     expect(result.changed).toEqual(["a"]);
   });
+});
+
+
+test("target and rendered-result budgets fail explicitly instead of truncating", () => {
+  expect(() => normalizeArguments({ agents: ["n".repeat(MAX_NAME_LENGTH + 1)] })).toThrow(/budget/);
+  expect(() => normalizeArguments({ agents: Array.from({ length: MAX_TARGETS + 1 }, (_, i) => `n${i}`) })).toThrow(/at most/);
+  expect(() => normalizeArguments({ agents: Array.from({ length: 100 }, (_, i) => `${i}${"x".repeat(1000)}`) })).toThrow(/budget/);
+  const targets = Array.from({ length: MAX_TARGETS }, (_, i) => `n${i}`);
+  expect(normalizeArguments({ agents: targets }).targetNames).toHaveLength(MAX_TARGETS);
+  const latest = new Map(targets.map(name => [name, "inactive" as const]));
+  const result = projectResult({ event: "idle", condition: "all" }, targets, new Set(), latest, new Map(), false);
+  expect(result.members).toHaveLength(MAX_TARGETS);
+  expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThanOrEqual(MAX_RESULT_BYTES);
+  expect(() => projectResult({ event: "idle", condition: "all" }, ["x".repeat(MAX_RESULT_BYTES)], new Set(), new Map(), new Map(), false)).toThrow(/output budget/);
 });
