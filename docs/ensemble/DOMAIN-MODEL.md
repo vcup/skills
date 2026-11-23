@@ -1,6 +1,6 @@
 # 协调与学习领域模型
 
-本文件定义面向 DSH `0.2.2-rc.4` 的 ensemble 插件的业务事实与可观察行为（固定源码基线见[设计入口](README.md)）；存储实现见[档案设计](ARCHIVE-DESIGN.md)，具体实施入口见[实施计划](IMPLEMENTATION.md)。术语以[方法词汇](../../skills/ensemble/GLOSSARY.md)为准。领域划分源于不同的事实和变化原因，不要求每个模型各占一个 npm 包。
+本文件定义 ensemble 插件的业务事实与可观察行为（设计源码基线见[设计入口](README.md)，当前受测 DSH 集合见[版本支持与升级](../UPGRADING.md)）；存储实现见[档案设计](ARCHIVE-DESIGN.md)，具体实施入口见[实施计划](IMPLEMENTATION.md)。术语以[方法词汇](../../skills/ensemble/GLOSSARY.md)为准。领域划分源于不同的事实和变化原因，不要求每个模型各占一个 npm 包。
 
 ## 1. 身份与权威
 

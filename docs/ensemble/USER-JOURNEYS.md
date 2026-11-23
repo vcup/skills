@@ -6,7 +6,7 @@
 
 | 步骤 | 生产者 → 输入 → 动作 | 保存点 / 返回 → 消费者 | 失败后的下一步 |
 |---|---|---|---|
-| 1 | owner选择档案根、source世界与权限，initialize | 初始binding/grant提交、archive id与revision → Lead | 根重叠或世界映射不明，返回具体冲突，修正绑定 |
+| 1 | owner选择档案根、source世界与权限，经 `manage` 的 `initialize` 建立档案（`initial_grants` 必须写明 owner 的 `ownerId`/`hostAuthorityId` 或 session 的 `sessionId`/`rootSessionId`） | 初始binding/grant提交、archive id与revision → Lead | 根重叠或世界映射不明，返回具体冲突，修正绑定 |
 | 2 | 用户调用ensemble；Lead读取checkpoint/偏好并open | active invocation、coverage与criterion id → 计划 | 无open权限交owner处理；open冲突先读head |
 | 3 | Lead按任务与上下文匹配plan_attempt，调用原生subagent | planned attempt与独立原生创建返回 → Lead绑定member | 创建失败记录missing；计划与返回身份分别保留 |
 | 4 | 成员读任务包/共享任务与必要证据，领取可用任务 | 原生task revision；已有archive提交grant → 成员工作 | task被占用重新协调；缺grant由L在委托内分配或请owner |
@@ -76,17 +76,22 @@
 
 ## 5. 信息结构与交互
 
+侧栏有一个 `sidebar.panellist` 图标（`order: 30`，标题 “Ensemble”），点开是主面板，标签顺序与随包界面一致：
+
 ```text
 Ensemble
-├─ 项目与绑定（owner） → 根/世界映射、授权、接管、诊断
 ├─ 当前工作 → 目标/覆盖 → 尝试与贡献 → 候选/检查 → 下一步
 ├─ 资料 → 摘要列表 → 原文/附件 → 版本与来源
 ├─ 阅读 → 概览 → 领域 → 条目 → 审阅/更正与证据
 ├─ 经验 → 适用性过滤 → 建议与限制 → 应用/反例
-└─ 管理（owner） → 环境偏好、导入预览、导出、备份/恢复、复制
+├─ 历史 → 固定快照的对象历史与提交引用
+├─ 项目与授权（owner） → 根/世界映射、授权、接管、诊断
+└─ 管理维护（owner） → 环境偏好、导入预览、导出、备份/恢复、复制
 ```
 
-当前工作、资料与阅读是只读展示；创建或修改通过模型命令或明确的owner管理操作。按钮展示具体目标、revision和影响范围；绑定、授权、导入及恢复在提交前给差异预览。headless返回同样的预览记录与operation id，再提交明确动作，无需浏览器会话也能完成管理。
+**还没有任何项目时**，`项目与授权` 直接给出初始化表单（`expected_revision: absent`），这就是第一个 owner 动作的入口；其余标签提示尚未选择项目。**环境偏好位于 `管理维护` 之内**，不是独立标签。
+
+当前工作、资料、阅读、经验与历史是固定快照的只读查询（分页）；创建或修改通过模型命令或明确的 owner 管理操作。owner 写入面是 `项目与授权` 与 `管理维护`，两者都是 表单 → 预览 → 提交 的 revision 绑定流程。按钮展示具体目标、revision和影响范围；绑定、授权、导入及恢复在提交前给差异预览。headless返回同样的预览记录与operation id，再提交明确动作，无需浏览器会话也能完成管理。
 
 每个文档页固定project、对象版本和archive read_revision，面包屑可返回其invocation/domain。贡献旁分开显示“已返回/已采纳/检查结果”；原生运行状态附观察时点。证据点击走对应授权资源，归档内链接不用任意Host路径。草稿默认有可见标识，更正/争议展示在当前正文顶部，历史页显示当时状态并提供当前更正入口。
 

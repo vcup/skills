@@ -1,12 +1,12 @@
 # DSH 插件实施准备与验收
 
-本文件列明可领取切片和目前没有的运行证据。整体目标见[设计入口](README.md)；协调/学习行为见[领域模型](DOMAIN-MODEL.md)；数据与事务见[档案设计](ARCHIVE-DESIGN.md)；完整替代条件见[表达矩阵](REPLACEMENT-MAP.md)。仅面向 DSH `0.2.2-rc.4`（固定源码 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）。**当前已实现/已提交/未发布的探针状态、命令与未验边界只以 [P1 交付记录](P1-DELIVERY.md)为准，本文件不另述进度；产品代码实现、完整安装与 GUI 尚未验收。**
+本文件列明可领取切片和目前没有的运行证据。整体目标见[设计入口](README.md)；协调/学习行为见[领域模型](DOMAIN-MODEL.md)；数据与事务见[档案设计](ARCHIVE-DESIGN.md)；完整替代条件见[表达矩阵](REPLACEMENT-MAP.md)。设计源码基线为 DSH `0.2.2-rc.4`（固定提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`）；受测集合与默认版本见[版本支持与升级](../UPGRADING.md)。**实现与验证状态以[生产交付设计与验收](../PRODUCTION.md)为准，本文件不另述进度。**
 
 ## 1. 交付形态
 
 按[三路径隔离设计](DISTRIBUTION.md)从共同方法源构建纯skill、OMP、DSH三个独立安装产物。DSH有自己的包身份、Host/root与Client入口、技能正文及参考资源；OMP由自己的发布包继续交付。维护源码共用，安装根和使用说明分别闭合。
 
-拟新增代码布局已部分在工作树实现（见 [P1 交付记录](P1-DELIVERY.md)），以下多数 DSH 领域/Archive 文件仍不存在：
+代码布局已按 Module 落地（纯领域在 `modules/ensemble/`，原生接入在 `adapters/dsh/{native,tools,store,maintenance,uploads,environment,client}`）；下面这张图保留最初的拟议结构，作为职责分工参考，实际文件路径以上述目录为准。实现与验证状态见[生产交付设计与验收](../PRODUCTION.md)。
 
 ```text
 adapters/dsh/
@@ -74,7 +74,7 @@ A–F是技术切片，[ROADMAP](../../ROADMAP.md)统一P1–P7阶段与依赖�
 
 | 切片 | 可审中间产物 | 通过条件 |
 |---|---|---|
-| A：组合可行性 | 最小已打包Host+Client；同域Host archive Git探针 | 正式Loader启动，source在另一执行域仍不误读；没有任意Host读写；发布包不依赖scratch源码。当前工作树证据仅为 rc.4 公开 Loader 上的 Host-only 帮助探针（技能注册与固定参考读回），未覆盖完整 profile 启动、Client、Host 隔离或外部 Git，见 [P1 交付记录](P1-DELIVERY.md) |
+| A：组合可行性 | 最小已打包Host+Client；同域Host archive Git探针 | 正式Loader启动，source在另一执行域仍不误读；没有任意Host读写；发布包不依赖scratch源码。该切片现由 `host-check`、`product-check`、`store-acceptance-check`、`native-acceptance-check` 分别提供证据，见[生产状态](../PRODUCTION.md) |
 | B：确定性协调替代 | open→artifact→attempt→decision→candidate/check→next/lifecycle 的typed commands、读回与checkpoint | [替代矩阵](REPLACEMENT-MAP.md)全部现有表达可实现；unknown原文/各状态/修订不丢 |
 | C：原子版本与恢复 | Git事务、receipt、grant/binding、故障注入 | CAS、响应丢失、重启、撤销、磁盘错误、损坏版本均不误报；source Git不变化 |
 | D：学习与出版 | coaching→新例check→reflection/review/publish→lesson→下一任务检索 | 学习/保存/出版/应用各有证据；未审/反例/适用性可见；领域拆分与更正保持引用 |
@@ -129,7 +129,7 @@ P0补齐的约定按以下成对场景验证；括号中的D项与[路线图](..
 
 ## 7. 设计证据与运行交接
 
-已完成固定发行源码研究、方法修订、领域/全表达映射，以及命令、管理和三条旅程的文档约定。工作树已完成内容装配、OMP 独立包与 DSH Host-only Loader 探针（均已通过非作者独立复核），各自通过测试，命令与证据见 [P1 交付记录](P1-DELIVERY.md)；这些不是产品实现验收。P1优先验证[运行管理](OPERATIONS.md#1-范围决定与支持组合)选定的Linux Host、本地Git/fsync、Web/headless及容器source组合，再确定发布支持范围；P2–P6分别提供CAS、授权、内容、UI和数据维护证据。设计基线为 rc.4；当前支持集为 rc.4 与 rc.5（默认 rc.5），版本契约与升级流程见 [版本支持与升级](../UPGRADING.md)。精确字段、对象revision和失败规则直接转成实现schema及成对检查，变化回写对应设计。
+已完成固定发行源码研究、方法修订、领域/全表达映射，以及命令、管理和三条旅程的文档约定。内容装配、OMP 独立包与 DSH 包由 Make 门分别验证，命令见[开发指南](../DEVELOPMENT.md)、状态见[生产状态](../PRODUCTION.md)；历史阶段证据见 [P1 交付记录](P1-DELIVERY.md)。P1优先验证[运行管理](OPERATIONS.md#1-范围决定与支持组合)选定的Linux Host、本地Git/fsync、Web/headless及容器source组合，再确定发布支持范围；P2–P6分别提供CAS、授权、内容、UI和数据维护证据。设计基线为 rc.4；当前支持集为 rc.4 与 rc.5（默认 rc.5），版本契约与升级流程见 [版本支持与升级](../UPGRADING.md)。精确字段、对象revision和失败规则直接转成实现schema及成对检查，变化回写对应设计。
 
 初版只支持同Host本地Git单主存储，不做多Host共享文件系统写、自动远端同步、自动全局prompt优化或模型权重训练。不存在“完备”总布尔值：分别报告表达覆盖、领域流程、静态Interface可行性、真实组合、故障与运行证据。
 

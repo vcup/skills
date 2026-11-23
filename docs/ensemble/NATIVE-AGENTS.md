@@ -1,6 +1,6 @@
 # 原生代理、上下文与模型选择
 
-本设计针对 DSH **`0.2.2-rc.4`**，固定源码提交 **`3f321d32bfe382212a8ed8785c1d47a5a300aa23`**；对应正式标签 `dsh-v0.2.2-rc.4`，已核对[包清单][version]及[发布基线](README.md)，安装和运行验收尚未完成。源码支持、部署配置和实际运行结果分别取证；当前会话的旧工具 schema 不作为目标版本能力上限。通用方法和场景取舍见[驱动选择指引](../../skills/ensemble/README.md#choose-how-to-drive-native-agents)，本文件负责 DSH 接入决定。
+本设计的源码基线是 DSH **`0.2.2-rc.4`**，固定提交 **`3f321d32bfe382212a8ed8785c1d47a5a300aa23`**；对应正式标签 `dsh-v0.2.2-rc.4`，已核对[包清单][version]及[发布基线](README.md)。该固定提交是设计依据，不是当前支持范围：受测集合与默认版本见[版本支持与升级](../UPGRADING.md)。源码支持、部署配置和实际运行结果分别取证；当前会话的旧工具 schema 不作为目标版本能力上限。通用方法和场景取舍见[驱动选择指引](../../skills/ensemble/README.md#choose-how-to-drive-native-agents)，本文件负责 DSH 接入决定。
 
 ## 1. 一个代理模型，分别选择上下文与协作方式
 

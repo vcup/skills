@@ -1,6 +1,6 @@
 # 领域命令与查询约定
 
-本文件规定待实现的工具字段、状态和调用结果；[档案设计](ARCHIVE-DESIGN.md)负责提交，[运行管理](OPERATIONS.md)负责用户授权与维护，[用户旅程](USER-JOURNEYS.md)给出串联样例。表中字段均必填，`?` 表示可省略；未列出的字段拒绝。数组可空仅限表中没有最低项数的字段。工具名是拟定产品 Interface，安装入口与交付进度见[实施准备](IMPLEMENTATION.md)。
+本文件规定工具字段、状态和调用结果，并与随包发布的封闭解码器（`modules/ensemble/codec.ts`）一致：未列出的字段、`null`、坏类型与超预算输入一律拒绝，解码发生在任何业务处理之前。[档案设计](ARCHIVE-DESIGN.md)负责提交，[运行管理](OPERATIONS.md)负责用户授权与维护，[用户旅程](USER-JOURNEYS.md)给出串联样例。表中字段均必填，`?` 表示可省略；数组可空仅限表中没有最低项数的字段。实现与验证状态见[生产交付设计与验收](../PRODUCTION.md)，本文件不重复进度。
 
 ## 1. 共同输入与引用
 
@@ -105,11 +105,11 @@ completed/abandoned之后允许读取、新artifact、finding/challenge、coachi
 | `reading` | domain_id；revision?, include_drafts?, cursor?, page_size? | 默认出版条目与更正状态；草稿须显式请求 |
 | `lessons` | task_context；domain_id?, status?, revision?, text?, cursor?, page_size? | 默认supported；适用性matched/unknown/mismatch及依据，unknown单独列出，不作肯定推荐 |
 | `receipt` | operation_id | 当前actor的已提交收据，或明确not_found；管理诊断可查获准actor |
-| `environment_preferences` | role, task_context | 在独立environment read grant内返回候选route及可用性/授权诊断，不返回凭证 |
+| `environment_preferences` | role, task_context | 在独立 environment read grant 内返回候选 route 及 `allowed`/`unavailable`/`unknown` 与理由，不返回凭证。要求本部署恰好装配一个活跃原生 Settings target，否则返回 `storage_unavailable` |
 
 首次未给revision时捕获一次head，结果总带`read_revision`。cursor绑定该revision、查询摘要和排序位置；续页不得混入新head，过期返回cursor_expired，用户可重新打开。每页重新验证当前权限，历史grant不能授予今天的读权。检索先按domain/status/任务与接口能力过滤，再做Unicode规范化、大小写折叠的字面词项搜索，返回命中片段、限制条件和匹配原因；无分词语义保证，不按热度推断质量。空结果、预算拒绝和部分页分别表示。
 
-`ensemble_reference(document, section?, cursor?)`只读取随包分发的固定参考枚举：method、glossary、patterns、checkpoint、evolution、dsh-native、dsh-commands；不接受路径或任意资源名。这些资源均来自DSH产物；method等公共内容在构建时合入，checkpoint只讲DSH工具返回的视图，其链接也只解析到DSH包内参考。支持按标题section及完整响应预算分页，返回包版本与内容digest，不需archive授权。
+`ensemble_reference(resource)`只读取随包分发的固定文件名枚举：`EVOLUTION-TEMPLATE.md`、`GLOSSARY.md`、`PATTERNS.md`、`README.md`、`STATE-TEMPLATE.md`；参数只有一个必填 `resource`，不接受路径、目录或任意资源名，符号链接一律拒绝。单次返回完整文件，超过 65536 字节以 `OUTPUT_BUDGET_EXCEEDED` 失败而不是截断；它读取自带参考，不读档案，因此不需要 archive 授权。
 
 ## 6. 结果与重试
 
@@ -125,5 +125,11 @@ completed/abandoned之后允许读取、新artifact、finding/challenge、coachi
 | `storage_unavailable` / `lock_busy` | 提交前失败且ref未动 | 恢复条件后可用原键重试 |
 | `outcome_unknown` | 无法确认ref发布结果 | 只查receipt并对账，停止依赖该成功的动作 |
 | `unsupported_version` / `archive_corrupt` | 记录或Git验证不通过 | 进入owner只读诊断与恢复流程 |
+| `binding_required` / `binding_ambiguous` | 没有可信绑定，或可信绑定匹配到多个档案 | 由owner显式绑定/选择；不要猜路径或项目 |
+| `stale_inventory` / `source_changed` | 导入清单过期或源在读取期间变化 | 重新预览并生成新清单，不混合快照 |
+| `destination_exists` | 导出/备份目的地已存在 | 显式确认覆盖或改目的地 |
+| `restore_read_only` | 恢复候选尚未激活 | 完成激活步骤后再期待写入 |
+| `source_stop_required` | 未提供原writer停写证据 | 停写并记录命名最终head的批准 |
+| `remote_conflict` | 远端ref与期望不一致 | 重新读取远端后决定；不force、不merge |
 
 错误带`operation_id?、field?、retryable、current_revision?`，且仅向获准读者给当前revision。已提交但通知失败仍返回committed；取消在提交点之前停止，提交点附近先对账，不把取消等同于回滚。receipt在同actor仍有操作/读取权时优先于expected_revision检查；撤权后不可通过重试泄漏旧结果。

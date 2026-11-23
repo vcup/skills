@@ -57,7 +57,7 @@ OMP的[技能发现实现](https://unpkg.com/@oh-my-pi/pi-coding-agent@17.2.15/s
 
 OMP与DSH分别从干净staging root打包；每个root拥有自己的package manifest、README、exports和文件白名单。OMP包只声明OMP入口；DSH包只声明DSH Host/Client与资源。DSH不依赖OMP包，也不从它读取技能正文；两包都不依赖运行时下载通用方法。
 
-当前 DSH 支持集合、默认版本与升级流程见[版本支持与升级](../UPGRADING.md)；以下各路径约定不因支持集合扩大而改写。OMP可保留现有`@vcup/skills`包身份及其它既有技能的交付，DSH使用另一个包身份（`dsh-ensemble-probe`）。插件包的发布地址在发布配置中指定；当前两个包都只在工作树生成，未发布、没有远端地址。各路径安装页只给自己的精确命令，删除旧混合入口。纯skill的Git安装地址保持`vcup/skills`。母仓库的多路径README不进入安装后的技能目录或插件包；npm会自动包含的README/package元数据在各自staging root生成，不能只靠根包`files`排除。
+当前 DSH 支持集合、默认版本与升级流程见[版本支持与升级](../UPGRADING.md)；以下各路径约定不因支持集合扩大而改写。OMP可保留现有`@vcup/skills`包身份及其它既有技能的交付，DSH使用另一个包身份（`dsh-ensemble`，1.0 起取代 `dsh-ensemble-probe`）。插件包的发布地址在发布配置中指定；当前两个包都只在工作树生成，未发布、没有远端地址。各路径安装页只给自己的精确命令，删除旧混合入口。纯skill的Git安装地址保持`vcup/skills`。母仓库的多路径README不进入安装后的技能目录或插件包；npm会自动包含的README/package元数据在各自staging root生成，不能只靠根包`files`排除。
 
 OMP 隔离包按“命令 + 输出位置约定”安装（OMP 17.2.15 的安装器接受本地**目录**或 registry spec，不接受 `.tgz` 文件）：
 
@@ -66,7 +66,7 @@ make pack-omp
 omp install ./build/pack/omp/staging
 ```
 
-产物是本地工作树构建结果，未发布到 registry，远端地址不存在。DSH Host-only 探针包由 `make pack-dsh` 生成在 `build/pack/dsh/`，同样未发布。工作树产物可由上述命令重现，不是私有或临时路径。
+产物是本地工作树构建结果，未发布到 registry，远端地址不存在。`dsh-ensemble` 本地 tarball 由 `make pack-dsh` 生成在 `build/pack/dsh/`，同样未发布；它是随包提供模型工具、owner Remote、CLI 与 Client 的正式候选，不再是单一探针。工作树产物可由上述命令重现，不是私有或临时路径。
 
 原来“给同一包增加DSH exports并携带OMP入口”的方案被此需求取代。需要迁移的是OMP原先指向混合源码仓的Git安装入口（`omp install github:vcup/skills`）；该入口已由本路径的隔离包取代，不再是未解决的远端安装。纯skill的上述命令保留。OMP旧安装的替换由其包管理器完成，保留用户研究记录与配置；迁移说明明确仍交付的其它技能，避免悄悄缩减原包能力。
 
@@ -85,7 +85,7 @@ omp install ./build/pack/omp/staging
 | 内容检查 | 公共内容无路径分支；本target正文无其它路径的名称、安装命令、工具说明或比较段落；关键词检查配合审阅 |
 | 参考闭包 | 每个入口、角色autoload和按需参考逐一展开；内部链接存在且留在本产物，缺文件直接使构建失败 |
 | 单独安装 | 在干净环境用上述两条`npx skills@latest add vcup/skills`命令分别检查技能发现与ensemble选择；OMP/DSH从独立包安装。安装根、README与帮助只含本路径内容；同名重复安装不合并 |
-| 实际加载 | OMP检查用户入口和成员autoload；DSH检查skill provider、全部reference枚举与Client帮助；纯skill在无构建工具、无母仓库本地文件时读完安装目录的所有参考 |
-| 同步与迁移 | 同一source revision构建三产物，common部分digest一致；CI重新生成纯skill后须与提交内容无差异，防止只改源而漏提交；升级保留用户数据与纯skill原安装地址。当前工作树产物经 `check skill` 一致；内容装配与包探针见提交 749df3d，CI 工作流在工作树定义且已提交，但**未在 GitHub 实跑**、包**未发布**（逐项状态见 [P1 交付记录](P1-DELIVERY.md)） |
+| 实际加载 | OMP检查用户入口和成员autoload；DSH检查skill provider、四个领域工具的封闭参数、`ensemble_reference` 的固定枚举与Client入口；纯skill在无构建工具、无母仓库本地文件时读完安装目录的所有参考 |
+| 同步与迁移 | 同一source revision构建三产物，common部分digest一致；CI重新生成纯skill后须与提交内容无差异，防止只改源而漏提交；升级保留用户数据与纯skill原安装地址。当前工作树产物经 `check skill` 一致；CI 工作流已提交但**未在 GitHub 实跑**、包**未发布**（逐项状态见 [生产交付设计与验收](../PRODUCTION.md)） |
 
-内容隔离归C01/C15与P1打包职责，最终由P7逐路径验收。工作树已实现并已提交的顺序：先分出common和三套路径内容（749df3d）→生成并提交纯skill目录（749df3d）→构建OMP/DSH独立包（749df3d）→验证三条路径的本地安装与加载闭包；**GitHub CI 实跑、OMP入口迁移、发布与远端安装仍待完成**。构建规则和路径归属只有这一处维护；每个平台只维护自己的操作说明与Adapter。
+内容隔离归C01/C15与打包职责，最终由逐路径验收负责。已实现的顺序：分出common和三套路径内容 → 生成并提交纯skill目录 → 构建OMP/DSH独立包 → 验证三条路径的本地安装与加载闭包。**GitHub CI 实跑、registry 发布与远端安装仍待完成**，OMP 旧混合入口已由隔离包取代。构建规则和路径归属只有这一处维护；每个平台只维护自己的操作说明与 Adapter。

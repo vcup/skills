@@ -1,6 +1,6 @@
 # 插件管理的外置档案与工具
 
-这是待实施的 Interface。完整业务状态见[领域模型](DOMAIN-MODEL.md)，字段、权限与错误以[命令约定](COMMANDS.md)为准；持久布局、owner管理、预算及迁移见[运行管理](OPERATIONS.md)。旧 `.ensemble/` 的逐项替代见[替代矩阵](REPLACEMENT-MAP.md)。目标是**所有协调数据和高频历史都在工作区外，由程序维护；模型表达领域动作和正文内容，不维护文件树**。
+这是档案与工具的设计 Interface；其实现在 `adapters/dsh/{store,archive,records}.ts`，验证状态见[生产交付设计与验收](../PRODUCTION.md)，本页描述约定而不是进度。完整业务状态见[领域模型](DOMAIN-MODEL.md)，字段、权限与错误以[命令约定](COMMANDS.md)为准；持久布局、owner管理、预算及迁移见[运行管理](OPERATIONS.md)。旧 `.ensemble/` 的逐项替代见[替代矩阵](REPLACEMENT-MAP.md)。目标是**所有协调数据和高频历史都在工作区外，由程序维护；模型表达领域动作和正文内容，不维护文件树**。
 
 ## 1. 存储归属与部署
 

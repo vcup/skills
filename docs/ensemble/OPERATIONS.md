@@ -1,6 +1,6 @@
 # 配置、存储与运行管理
 
-本文件是owner管理和数据寿命的设计约定，面向 DSH rc.4。[命令约定](COMMANDS.md)定义模型动作，[用户旅程](USER-JOURNEYS.md)定义界面和headless操作路径。owner操作经已认证的用户控制入口进入同一Archive执行器；表中的动作名不是已经可运行的CLI命令。
+本文件是 owner 管理和数据寿命的设计约定；受测 DSH 集合与默认版本见[版本支持与升级](../UPGRADING.md)。[命令约定](COMMANDS.md)定义模型动作，[用户旅程](USER-JOURNEYS.md)定义界面和headless操作路径。owner 操作经已认证的用户控制入口进入同一 Archive 执行器；常规客户端是 Client 管理页与 `ensemble-archive` CLI。
 
 ## 1. 范围决定与支持组合
 
@@ -8,15 +8,15 @@
 
 远端能力纳入P6，定义为**单主档案的显式远端复制与恢复**：owner控制push和fetch-to-quarantine；没有后台自动同步、双向merge或多主写入。远端失败不影响已经完成的本地提交。fork保留provider/model及原effort；本轮交付范围不增加fork effort专用Interface，模型/effort差异通过fresh实现。将来若纳入同路由effort调整，须单独修改范围与执行器约定。
 
-首个验收组合为Linux Host、Node `>=24.9.0`、DSH精确 `0.2.2-rc.4`、Host本地持久文件系统、Web与headless；source分别测试Host本地和一个明确映射的容器世界。macOS/Windows/SSH source作为后续平台扩展，不在首次通过结果中暗含支持。Git最低候选为2.40，P1须验证实际Git、fsync与sandbox能力；若不满足则提升最低要求或修订存储方案。网络共享目录多主写不属于支持组合。
+首个验收组合为Linux Host、Node `>=24.9.0`、受测 DSH 发行版（见[版本支持与升级](../UPGRADING.md)）、Host本地持久文件系统、Web与headless；source分别测试Host本地和一个明确映射的容器世界。macOS/Windows/SSH source作为后续平台扩展，不在首次通过结果中暗含支持。Git最低候选为2.40，P1须验证实际Git、fsync与sandbox能力；若不满足则提升最低要求或修订存储方案。网络共享目录多主写不属于支持组合。
 
 ## 2. Owner 管理 Interface
 
-owner请求携带目标archive/environment id、`expected_revision`、`operation_id`；初始化使用absent，其余使用真实revision。首次选择物理位置只通过用户配置/目录选择，返回不可伪造的handle；模型业务命令不接受这些路径。GUI和headless调用同一管理Interface，headless须通过原生认证的用户控制通道执行，不能借模型工具文本冒充owner。
+owner请求携带目标archive/environment id、`expected_revision`、`operation_id`；初始化使用absent，其余使用真实revision。管理动作统一走已认证 Remote 的 `manage` 方法（单一 `request` 参数）。旧版 `dsh-ensemble-probe` 的 `initialize`/`bind` wire 方法在 1.0 中退役，不能用来创建 v2 档案；旧档案迁移走[版本支持与升级](../UPGRADING.md)的显式流程，原库、head 与历史不被新包写入。首次选择物理位置只通过用户配置/目录选择，返回不可伪造的handle；模型业务命令不接受这些路径。GUI和headless调用同一管理Interface，headless须通过原生认证的用户控制通道执行，不能借模型工具文本冒充owner。
 
 | 动作 | 业务输入 | 成功结果与恢复 |
 |---|---|---|
-| `initialize` | root_handle, source_descriptor, initial_grants, limits | 完整binding/grant初始commit，注册archive id；失败不登记可用项 |
+| `initialize` | root_handle, source_descriptor, initial_grants, limits | 完整binding/grant初始commit，注册archive id；失败不登记可用项。**1.0 只有这一条创建路径**：`initial_grants[].subject` 为 `{kind:"owner",ownerId,hostAuthorityId}` 或 `{kind:"session",sessionId,rootSessionId}`，缺少这些字段即 `invalid_input` |
 | `bind` / `rebind` | source_descriptor, mapping_evidence, reason | 新binding版本；新clone/worktree/世界映射显式核验，不按remote URL猜测 |
 | `grant` / `revoke` | subject_id, rights, invocation_scope?, reason | rights限read/open/lead/member-submit/review/organize，organize明确授予project级领域编辑权；撤销与写入同序；现有历史读权也重新判定 |
 | `takeover` | invocation_id, new_lead_session_id, reason | Lead变更与旧Lead写权收回同一事务，任务owner须另行原生交接 |
@@ -28,7 +28,7 @@ owner请求携带目标archive/environment id、`expected_revision`、`operation
 | `backup` / `restore` | revision, destination_handle / backup_handle, mapping_evidence | 完整校验备份或隔离恢复候选；restore不就地覆盖正在服务的档案 |
 | `relocate` | destination_handle, source_stop_evidence, mapping_evidence | 停写→复制验证→切换注册→重授权→恢复，旧位置只读保留 |
 | `upgrade` | target_format, migration_plan_ref | 在隔离副本迁移并验证，切换成功后恢复服务；失败继续使用原版本 |
-| `diagnose` | scope | 只读报告binding/grants/ref/receipts/format/容量/锁；不输出凭证 |
+| `diagnose` | scope | 只读报告 binding/grants/ref/receipts/format/容量/锁，并返回 `grant_ids[]`（每项 `{grant_id, rights, scope, revoked, expires_at?}`），以便 owner 指名要 `revoke` 的授权；不输出凭证 |
 | `maintain` | plan_ref, approval_ref | 执行预览过的GC/敏感数据清除等动作，记录影响与备份状态 |
 | `configure_replica` | destination_handle, credential_handle, expected_remote_identity | 保存非秘密目的地和策略，secret只引用原生handle；默认无网络操作 |
 | `push_replica` / `fetch_replica` | replica_id, local_revision / expected_remote_revision | 显式CAS复制或隔离获取；冲突不force、不merge、不改本地权威ref |
@@ -75,7 +75,7 @@ receipt保存其初次提交的sequence，不保存包含它的commit hash。查
 | lock_wait / operation_deadline | 5秒 / 60秒 | lock_busy；临近发布超时先查receipt |
 | cursor_ttl | 15分钟 | cursor_expired，重新打开快照 |
 
-上传入口为受限`ensemble_upload(action,payload)`：`begin {media_type,total_bytes,digest,invocation_id}`→upload_id；`chunk {upload_id,offset,bytes,digest}`→acknowledged range；`status {upload_id}`→已收区间；`commit {upload_id}`→sealed内容handle；`cancel {upload_id}`→已取消。每个入口验证当前grant，chunk范围不能重叠异字节，原块同digest重试幂等；seal必须字节数和SHA-256匹配，缺块不形成artifact。sealed不等于已归档：由put_artifact消费后才随ref发布。重复使用handle不生成隐式副本；读upload也受owner/actor作用域限制。
+上传入口为受限`ensemble_upload(action,payload)`：`begin {media_type,total_bytes,digest,invocation_id}`→upload_id；`chunk {upload_id,offset,bytes,digest}`→acknowledged range；`status {upload_id}`→已收区间；`commit`与`seal`是同一操作（共用`{upload_id}`载荷）→sealed内容handle；`cancel {upload_id}`→已取消。每个入口验证当前grant，chunk范围不能重叠异字节，原块同digest重试幂等；seal必须字节数和SHA-256匹配，缺块不形成artifact。sealed不等于已归档：由put_artifact消费后才随ref发布。重复使用handle不生成隐式副本；读upload也受owner/actor作用域限制。
 
 文本按UTF-8边界分页，任意字节按base64或授权下载返回；返回总字节数、digest、offset及next_cursor。下载链接短期有效并绑定权限，不暴露Host路径。压缩包不自动解压，二进制保存不限已知格式，内联预览仅按安全支持类型开放。预算控制完整响应；大段限制条件随所属条目一起读回，不能只展示推荐而丢适用限制。
 
@@ -83,9 +83,13 @@ receipt保存其初次提交的sequence，不保存包含它的commit hash。查
 
 environment仓与project仓不同id/ref/权限，存储非秘密偏好：角色→候选route顺序、明确effort或inherit策略、preset偏好、适用任务条件与理由。它不保存credential values、端点密钥、完整请求或project grant。导出默认仅project，environment需单独选择，credential重新在原生owner配置。
 
-owner动作：`environment_read`返回revision和desired/applied状态；`environment_set {preferences,expected_revision,operation_id}`保存desired revision；`environment_apply {desired_revision,target_session_ids,expected_native_revision}`尝试原生配置更新；`environment_reconcile`采集实际状态；`environment_restore {historical_revision}`以新提交恢复期望，不reset历史。写入偏好只产生desired，不能宣称已经改变原生Settings。
+owner动作：`environment_read`返回revision和desired/applied状态；`environment_set {preferences,expected_revision,operation_id}`保存desired revision；`environment_apply {desired_revision,target_id,expected_native_revision}`以 CAS 更新本插件在原生 Settings 注册的 rolePreferences 实例；`environment_reconcile`采集实际状态；`environment_restore {historical_revision}`以新提交恢复期望，不reset历史。写入偏好只产生desired，不能宣称已经改变原生Settings。
 
-应用记录区分pending/applied/failed/unknown及每个目标的结果。并发原生设置变化时拒绝覆盖；应用响应丢失先读实际设置，不能盲重试。两套存储不构成原子事务：环境仓保存意图与对账结果，原生Settings拥有有效配置。历史恢复和重新apply都重新检查当前能力/授权。DSH新root采样路由policy，旧Session不因配置更新自动获得新权限；需要新root时明确列出这一后续动作。
+应用记录区分pending/applied/failed/unknown及每个设置实例的结果。target_id 指 Settings 实例，必须由部署配置给出；不在本插件注册清单内的 id 返回 `not_authorized`。Session 列表仅用于当前可用性诊断，不是隐式模型切换目标。推荐器只消费原生已读回为 applied 的值，不消费 desired；执行仍经原生显式选型与当前权限检查。这一取舍见[角色偏好决定](../adr/0002-role-preferences-do-not-grant-routes.md)。
+
+已实现的封闭请求面（owner Remote 方法 `environment`，单一 `request` 参数）：`environment_read`、`environment_set`、`environment_restore`、`environment_grant_read`、`environment_preview`、`environment_apply`、`environment_reconcile`、`environment_backup`、`environment_recover`、`environment_history`。`environment_apply` 写的是本插件注册实例上的 `rolePreferences` 字段，以原生 Settings revision 做 CAS；冲突记 failed 且不覆盖，读回失败保持 unknown 并禁止盲重发。明确不做：切换 Lead 或 root 模型、改变既有成员模型、写入子代理 trusted `agentOptions`、扩大任何原生路由授权。
+
+模型侧读取走 `ensemble_read` 的 `kind: environment_preferences`，需要本部署恰好装配一个活跃原生 Settings target；否则返回 `storage_unavailable` 而不是猜测目标。requested/created/actual 三阶段选型证据的接口与单元测试已完成，端到端接线仍属未验证项，不得据此声称已记录实际模型请求。并发原生设置变化时拒绝覆盖；应用响应丢失先读实际设置，不能盲重试。两套存储不构成原子事务：环境仓保存意图与对账结果，原生Settings拥有有效配置。历史恢复和重新apply都重新检查当前能力/授权。DSH新root采样路由policy，旧Session不因配置更新自动获得新权限；需要新root时明确列出这一后续动作。
 
 模型只检索获准候选，由原生subagent执行选型。requested selection随attempt记录；created identity来自原生返回；actual request仅在授权原生日志/事件可读时由Adapter提取provider/model/effective effort、Session/event引用。原生事件缺字段或不可读就记unknown/unavailable，不从目录或模型自述填值，也不复制prompt。root选择属于用户控制，偏好推荐不能擅自切换Lead模型。
 
@@ -105,7 +109,32 @@ commit_import前重新核对目录成员集及每个字节digest；源发生变�
 
 ## 7. 远端复制、维护与敏感材料
 
-远端仅作为单主的复制目标。owner显式选择目的地和原生credential handle；project正文只记录replica id、期望/观察到的revision与结果，不含URL凭证。push使用remote旧ref预期与fast-forward检查，拒绝冲突和不相关历史；fetch进入隔离候选仓，仅验证和报告差异。恢复到本地权威位置复用restore/relocate授权，不自动pull到活动ref。断连返回failed或unknown，重新读取远端ref后对账，不能把网络请求已发出当备份完成。协议及transport实现由P6探针选择，网络权限独立于本地archive grant。
+远端仅作为单主的复制目标。owner 显式选择目的地和原生 credential handle；project 正文只记录 replica id、期望/观察到的 revision 与结果，不含 URL 凭证。push 使用 remote 旧 ref 预期与 fast-forward 检查，拒绝冲突和不相关历史；fetch 进入隔离候选仓，仅验证和报告差异。恢复到本地权威位置复用 restore/relocate 授权，不自动 pull 到活动 ref。断连返回 failed 或 unknown，重新读取远端 ref 后对账，不能把网络请求已发出当备份完成。网络权限独立于本地 archive grant。
+
+**当前实际可用范围。** 复制**引擎**与两个**真实 transport**都已实现并对真实 `git://` 远端验证过，但**出厂 composition 不挂载任何网络 transport**。因此：
+
+- 默认安装只支持 **Host 本地 `file` 目的地**的复制；
+- 指向非 Host 世界的目的地时，未挂载 transport 的执行器返回 `not_authorized`，说明需要另行批准的原生网络能力；
+- **不得声称 1.0 默认可用 ssh/https 远端复制**；`ssh://` 也不是本版的受支持复制协议（仅 `https`/`http`/`git`）。
+
+**两个 transport 的协议集不同，不能混写。**
+
+| transport | 位置 | 协议 | 用途 |
+|---|---|---|---|
+| 部署 transport | `adapters/dsh/maintenance/network-deployment.ts`（`createAllowlistedReplicaTransport`） | 仅 `https`/`http`/`git`，且 `host[:port]` 必须在部署 allowlist 内 | 供部署显式装配；拒绝 URL 内嵌 userinfo、未声明主机或端口、`file://`、`ext::`，拒绝空 allowlist |
+| 验用 transport | `adapters/dsh/maintenance/network.ts` | 仅 loopback 的 `git://`/`http://`/`https://` | 只用于对真实 `git daemon` 的验收，**不是生产 transport** |
+
+两者共同约束：固定 argv（不经 shell、不接受调用者 argv）、剥离环境（`GIT_CONFIG_GLOBAL=/dev/null`、`GIT_TERMINAL_PROMPT=0`、空 `GIT_ASKPASS`）、只做 expected-remote CAS 与 fast-forward（never force、never merge）、fetch 进入私有隔离候选且绝不移动主 ref、push 后重新读取远端。
+
+**部署声明。** 目的地由部署声明，不由调用者提供。原生适配层读取 `DSH_ENSEMBLE_REPLICA_DESTINATIONS`：一个以 handle 为键的 JSON 对象，可带一个可选顶层 `allow`（`host[:port]` 数组）；每个目的地的字段**只有** `url`、`identity`、`credential_ref`、`credential_username`，任何其它字段（包括旧式的 `credential_env` 与任何 `GIT_*` 名）都是未知字段，启动时拒绝。该变量只在部署装配了 transport 时才有意义；未设置时不挂载任何网络 transport。
+
+`credential_ref` 与 `credential_username` 必须成对：前者是 Host credential provider 中的秘密引用，后者是**非秘密**的 HTTP Basic 用户名（不含 `:`、控制字符或首尾空格）。只有其一即被拒绝：`credential_ref` 缺用户名时给出“HTTP Basic authentication needs a user name as well as the secret”，只有用户名时给出“a user name alone cannot authenticate”。
+
+凭据在每次传输时解析，值只经由包内**固定的私有 askpass helper** 交给 Git：helper 分别回答 Username 与 Password 提示、拒绝未知提示，配合 `GIT_TERMINAL_PROMPT=0`、禁 ambient credential helper、禁用重定向与 `LC_ALL=C`。部署不能指定环境变量名或 helper 路径，值不进入 URL、argv、结果或档案。`configure_replica` 只保存非秘密目的地与策略，网络动作另需独立授权。
+
+**证据边界。** 引擎与 transport 由仓库门验证：`bun test adapters/dsh/maintenance/network-deployment.test.ts` 与双版本 `scripts/verify-dsh-maintenance.ts`（真实 Cordis、真实 subprocess/sandbox provider、真实 Git、真实 OS 锁）覆盖 push/fetch、CAS 冲突与隔离候选。这证明网络 pipeline 与凭据机制成立，**不**证明任意远端主机、TLS 或跨网络拓扑；跨 Host 复制需要真实 allowlist 端点，其验收不在本版证据内。
+
+一个容易混淆的区分：匿名 `git://` 端点**不能**证明凭据认证成立。实测中，普通注入的环境变量对 Basic-auth 远端失败的形态与“完全没有凭据”相同，而上述 helper 才成功。所以“复制在匿名 git 上可用”与“复制会做凭据认证”是两个不同主张，只有后者与凭据有关。
 
 容量诊断报告可达内容、历史、未引用对象、staging及缓存占用；GC只在停写、备份校验后按owner预览计划执行，保留可达业务历史与receipts。没有自动保留期删除。逻辑正文限额和实际磁盘剩余分别检查，磁盘满不写source fallback。
 
