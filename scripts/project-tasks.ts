@@ -9,6 +9,7 @@
  *   doctor       what is installed, what is missing, and which targets that blocks
  *   staging      does the ignored staging for a content path exist yet
  *   inspect      what tarballs exist and what is inside them
+ *   matrix       do the built packages declare exactly the tested releases
  *   clean        delete only generated paths this repository owns
  *   install-dir  is this a real isolated DSH install, or just a directory
  *
@@ -28,16 +29,22 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_DSH_VERSION,
   DSH_RUNTIME_PACKAGE,
+  ENGINES_DSH,
+  SUPPORTED_DSH_VERSIONS,
   judgeReleases,
   supportedVersionsText,
   type ReleaseReading,
 } from "../adapters/dsh/compatibility.ts";
+import {
+  ENGINES_DSH as WAIT_ENGINES_DSH,
+  SUPPORTED_DSH_VERSIONS as WAIT_SUPPORTED_DSH_VERSIONS,
+} from "../adapters/dsh-agent-wait/meta.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -296,6 +303,156 @@ export function inspectArtifacts(
   return { ok: true, lines };
 }
 
+/** One built package's declared support, read from the tarball, not the source. */
+export interface MatrixReading {
+  readonly package: string;
+  readonly tarball: string;
+  readonly enginesDsh?: string;
+  readonly supportedDsh?: readonly string[];
+}
+
+export interface MatrixReport {
+  readonly ok: boolean;
+  readonly lines: readonly string[];
+  readonly readings: readonly MatrixReading[];
+}
+
+/** Read `package/package.json` out of a tarball without unpacking the rest. */
+function manifestFromTarball(tarball: string): Record<string, unknown> | undefined {
+  const extracted = spawnSync("tar", ["-xzOf", tarball, "package/package.json"], { encoding: "utf8" });
+  if (extracted.status !== 0) return undefined;
+  try {
+    return JSON.parse(extracted.stdout) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Check that the built packages declare exactly the releases the gates exercise.
+ *
+ * `engines.dsh` alone is not enough: it says what is *permitted*, and a
+ * disjunction is exactly where an untested release slips in. Both packaged
+ * manifests also record the exercised set, and this compares the recorded set —
+ * read out of the artifact an installer receives — with the maintained
+ * declarations. A package that advertises a release the matrix never ran, or
+ * omits one it did, fails here instead of in someone's profile.
+ *
+ * Offline: it reads built tarballs and the two declaration modules. A missing
+ * tarball is a failure, because "nothing to check" is not a pass.
+ * @returns the verdict, the human-readable lines and the readings behind them.
+ */
+/** Explicit tarballs to inspect. Omitted means "discover in the build output". */
+export interface MatrixPackages {
+  readonly ensemble?: string;
+  readonly wait?: string;
+}
+
+export function matrixCheck(root: string = REPO_ROOT, pinned: MatrixPackages = {}): MatrixReport {
+  // The parameter is `pinned`, not `packages`: the `packages` declared below is the list of
+  // entries under inspection, and naming both `packages` shadowed it — the loop then
+  // iterated the argument object and failed with `packages is not iterable`.
+  const lines: string[] = [];
+  const readings: MatrixReading[] = [];
+  const problems: string[] = [];
+
+  // Each package records its exercised set under its own manifest key, because
+  // the two plugins are independent products: the wait plugin must not have to
+  // grow an `ensemble` key to be checkable.
+  const packages: readonly {
+    name: string;
+    dir: string;
+    key: string;
+    supported: readonly string[];
+    pinned: string | undefined;
+  }[] = [
+    {
+      name: "dsh-ensemble",
+      dir: join(root, "build/pack/dsh"),
+      key: "ensemble",
+      supported: [...SUPPORTED_DSH_VERSIONS],
+      pinned: pinned.ensemble,
+    },
+    {
+      name: "dsh-agent-wait",
+      dir: join(root, "build/pack/dsh-agent-wait"),
+      key: "wait",
+      supported: [...WAIT_SUPPORTED_DSH_VERSIONS],
+      pinned: pinned.wait,
+    },
+  ];
+
+  for (const entry of packages) {
+    let tarball: string;
+    if (entry.pinned !== undefined) {
+      // The caller named the artifact (the release door pins it). Read that file and only
+      // that file: globbing here is what let a re-packed default masquerade as the
+      // candidate, and a gate must inspect the byte it was told to inspect.
+      tarball = isAbsolute(entry.pinned) ? entry.pinned : join(root, entry.pinned);
+      if (!existsSync(tarball)) {
+        problems.push(`${entry.name}: the named package does not exist: ${relative(root, tarball)}`);
+        continue;
+      }
+      lines.push(`${entry.name}: inspecting the named package ${relative(root, tarball)}`);
+    } else {
+      const found = existsSync(entry.dir)
+        ? readdirSync(entry.dir).filter((name) => name.startsWith(`${entry.name}-`) && name.endsWith(".tgz"))
+        : [];
+      if (found.length !== 1) {
+        problems.push(
+          `${entry.name}: expected exactly one built tarball in ${relative(root, entry.dir)}, ` +
+            `found ${found.length === 0 ? "none" : found.join(", ")} - run make pack`,
+        );
+        continue;
+      }
+      tarball = join(entry.dir, found[0]!);
+    }
+    const manifest = manifestFromTarball(tarball);
+    if (manifest === undefined) {
+      problems.push(`${entry.name}: ${relative(root, tarball)} has no readable package/package.json`);
+      continue;
+    }
+    const engines = (manifest.engines as { dsh?: unknown } | undefined)?.dsh;
+    const declared = (manifest[entry.key] as { supportedDsh?: unknown } | undefined)?.supportedDsh;
+    const supported =
+      Array.isArray(declared) && declared.every((value) => typeof value === "string")
+        ? (declared as string[])
+        : undefined;
+    const expected = entry.supported.join(" || ");
+    const intact = (typeof engines === "string" ? engines === expected : false) &&
+      (supported === undefined ? false : supported.join(",") === entry.supported.join(","));
+    readings.push({
+      package: entry.name,
+      tarball: relative(root, tarball),
+      ...(typeof engines === "string" ? { enginesDsh: engines } : {}),
+      ...(supported === undefined ? {} : { supportedDsh: supported }),
+    });
+
+    if (engines !== expected) {
+      problems.push(
+        `${entry.name}: engines.dsh is ${JSON.stringify(engines)}, but the maintained set is ${JSON.stringify(expected)}`,
+      );
+    }
+    if (supported === undefined) {
+      problems.push(`${entry.name}: the packaged manifest does not record ${entry.key}.supportedDsh`);
+    } else if (supported.join(",") !== entry.supported.join(",")) {
+      problems.push(
+        `${entry.name}: the package records supportedDsh=${supported.join(", ")}, ` +
+          `but the gates exercise ${entry.supported.join(", ")}`,
+      );
+    }
+    lines.push(
+      intact
+        ? `  ok      ${entry.name.padEnd(18)} ${relative(root, tarball)} declares ${expected}`
+        : `  FAIL    ${entry.name.padEnd(18)} ${relative(root, tarball)}`,
+    );
+  }
+
+  for (const problem of problems) lines.push(`  FAIL    ${problem}`);
+  if (problems.length === 0) lines.push(`  engines text: ${ENGINES_DSH} (ensemble), ${WAIT_ENGINES_DSH} (wait)`);
+  return { ok: problems.length === 0, lines, readings };
+}
+
 export interface InstallDirReport {
   readonly ok: boolean;
   readonly problems: readonly string[];
@@ -463,6 +620,34 @@ if (import.meta.main) {
       for (const line of result.lines) console.log(line);
       process.exit(result.ok ? 0 : 1);
     }
+    case "matrix": {
+      // `--package <tgz>` names the artifact to inspect. The release door pins one and
+      // passes it here so the manifest gate reads that byte; without it the gate falls
+      // back to whatever `build/pack/dsh` currently holds, which is a re-packable
+      // default and not an acceptance object.
+      let packagePath: string | undefined;
+      const known: string[] = [];
+      for (let index = 0; index < rest.length; index += 1) {
+        const arg = rest[index]!;
+        if (arg === "--package") {
+          const value = rest[index + 1];
+          if (value === undefined || value.startsWith("--")) {
+            fail("--package needs a tarball path\nusage: project-tasks.ts matrix [--check] [--package <tgz>]", 2);
+          }
+          packagePath = value;
+          index += 1;
+          continue;
+        }
+        known.push(arg);
+      }
+      const unknown = known.filter((arg) => arg !== "--check");
+      if (unknown.length > 0) {
+        fail(`unknown argument: ${unknown[0]}\nusage: project-tasks.ts matrix [--check] [--package <tgz>]`, 2);
+      }
+      const report = matrixCheck(REPO_ROOT, packagePath === undefined ? {} : { ensemble: packagePath });
+      for (const line of report.lines) console.log(line);
+      process.exit(report.ok ? 0 : 1);
+    }
     case "install-dir": {
       const requireTypes = rest.includes("--types");
       const quiet = rest.includes("--quiet");
@@ -493,7 +678,7 @@ if (import.meta.main) {
     }
     default:
       fail(
-        "usage: bun scripts/project-tasks.ts <doctor|staging <omp|dsh>|inspect|install-dir [--types] [--quiet] <dir>|clean [--all]>",
+        "usage: bun scripts/project-tasks.ts <doctor|staging <omp|dsh>|inspect|matrix [--check]|install-dir [--types] [--quiet] <dir>|clean [--all]>",
         2,
       );
   }

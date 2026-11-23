@@ -1,6 +1,9 @@
 {
-  "format": "dsh-cli-bundle/v1",
+  "format": "dsh-cli-bundle/v2",
   "entry": "adapters/dsh/lib/transport.mjs",
+  "entrySha256": "bce41aebcf7643258bc4b65bc70a66520439035b4390d21aaedda419a8c348cf",
+  "generatorSha256": "9cf6069ef4661ee3cfbad873d3183d0ad09e6f92fdb9c65b1cedbb9651b74fe4",
+  "bunVersion": "1.4.5",
   "bytes": 113721,
   "sha256": "5553d072ed48f97a5d2ffa3d11f1c6d30dbf1daad2413ae50df46796d7d8dec2",
   "inputs": [

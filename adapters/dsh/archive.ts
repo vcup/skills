@@ -67,12 +67,22 @@ export interface Confined {
   readonly enforcement?: string;
 }
 
+/**
+ * The policy fields this module uses. It mirrors the published `SandboxExecutionPolicy` subset
+ * instead of narrowing it: `additionalWritableRoots` is a real capability the enforcing host
+ * validates (it rejects missing, non-directory and symlinked entries on every call), so leaving it
+ * out of the seam would push callers into casts.
+ */
+export interface ConfinePolicy {
+  readonly mode: "read-only" | "workspace-write";
+  readonly workspaceRoot: string;
+  /** Extra absolute roots `workspace-write` may also write under; absent means none. */
+  readonly additionalWritableRoots?: readonly string[];
+}
+
 /** The sandbox service as this module uses it. */
 export interface SandboxLike {
-  readonly confine: (
-    argv: readonly string[],
-    policy: { readonly mode: "read-only" | "workspace-write"; readonly workspaceRoot: string },
-  ) => Promise<Confined>;
+  readonly confine: (argv: readonly string[], policy: ConfinePolicy) => Promise<Confined>;
 }
 
 /**
@@ -170,23 +180,32 @@ export function buildIsolatedGroup(
     );
   }
 
-  // Constructing the providers registers them in the group's own scope.
+  // A plugin fiber may not be ACTIVE yet: registration is scoped immediately,
+  // but group.get() need not expose it until activation. Keep the explicitly
+  // constructed local instances; never fall back to the outer execution world.
+  let mountedSubprocess: unknown;
+  let mountedSandbox: unknown;
   try {
-    factories.subprocess(group);
-    factories.sandbox(group);
+    mountedSubprocess = factories.subprocess(group);
+    mountedSandbox = factories.sandbox(group);
   } catch (error) {
     throw new SeamUnavailableError(
       `the local subprocess/sandbox providers could not be mounted in the isolated group: ${(error as Error).message}`,
     );
   }
 
-  const sandbox = group.get("sandbox") as SandboxLike | undefined;
-  const subprocess = group.get("subprocess") as SubprocessLike | undefined;
+  const sandbox = (mountedSandbox && typeof (mountedSandbox as SandboxLike).confine === "function"
+    ? mountedSandbox : group.get("sandbox")) as SandboxLike | undefined;
+  const subprocess = (mountedSubprocess && typeof (mountedSubprocess as SubprocessLike).spawn === "function"
+    ? mountedSubprocess : group.get("subprocess")) as SubprocessLike | undefined;
   if (sandbox === undefined || typeof sandbox.confine !== "function") {
     throw new SeamUnavailableError("the isolated group did not provide a sandbox with confine()");
   }
   if (subprocess === undefined || typeof subprocess.spawn !== "function") {
     throw new SeamUnavailableError("the isolated group did not provide a subprocess with spawn()");
+  }
+  if (sandbox === outer.get("sandbox") || subprocess === outer.get("subprocess")) {
+    throw new SeamUnavailableError("the local provider instance must be distinct from the outer execution-world service");
   }
   return { sandbox, subprocess };
 }
@@ -572,13 +591,18 @@ export function archivePolicy(archiveRoot: string): {
  * @param archiveRoot - the validated archive root.
  * @param command - one of the fixed commands.
  * @param options.mode - `workspace-write` for commands that create objects.
+ * @param options.additionalWritableRoots - extra absolute roots the command may write under.
  * @returns the exit code and both streams.
  */
 export async function runGit(
   group: { readonly sandbox: SandboxLike; readonly subprocess: SubprocessLike },
   archiveRoot: string,
   command: GitCommand,
-  options: { readonly mode?: "read-only" | "workspace-write" } = {},
+  options: {
+    readonly mode?: "read-only" | "workspace-write";
+    /** Additional absolute roots `workspace-write` may write under, e.g. a replica destination. */
+    readonly additionalWritableRoots?: readonly string[];
+  } = {},
 ): Promise<GitResult> {
   const argv = gitArgv(command);
   // Commands that create objects need write access to the archive; the rest are
@@ -591,7 +615,14 @@ export async function runGit(
 
   // The root comes from the deployment policy, never from the session cwd.
   const policy = archivePolicy(archiveRoot);
-  const confined = await group.sandbox.confine(argv, { mode, workspaceRoot: policy.workspaceRoot });
+  // Forward the extra roots when the caller has them: a replica push writes outside the archive
+  // root, so dropping them here would let the sandbox deny a legitimate destination.
+  const roots = options.additionalWritableRoots;
+  const confined = await group.sandbox.confine(argv, {
+    mode,
+    workspaceRoot: policy.workspaceRoot,
+    ...(roots && roots.length > 0 ? { additionalWritableRoots: roots } : {}),
+  });
   // Fail closed: a "confined" wrap that hands back the caller's own argv is not
   // confinement, so it must not be spawned as though it were.
   if (!Array.isArray(confined.argv) || confined.argv.length < argv.length || confined.argv[0] === argv[0]) {

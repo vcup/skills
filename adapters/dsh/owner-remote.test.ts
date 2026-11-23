@@ -23,6 +23,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { PACKAGE_NAME, PACKAGE_VERSION, STAGING_DIR } from "./meta.ts";
 // The namespace is asserted here as a literal because importing the Remote
 // module would pull in `@deepseek-ai/*`, which is not on this module path; the
 // constant is checked by the gateway test below, which runs inside the install.
@@ -69,11 +70,14 @@ const INSTALL = resolveInstall();
  * could not be parsed by the gateway. Testing the source would miss it, so the
  * regression runs against whatever `pack-dsh` produced.
  */
-const TARBALL = join(import.meta.dir, "..", "..", "build", "pack", "dsh", "dsh-ensemble-probe-0.3.0.tgz");
+const PINNED_TARBALL = process.env.DSH_CLI_TEST_TARBALL;
+const TARBALL = PINNED_TARBALL === undefined || PINNED_TARBALL.trim() === ""
+  ? join(import.meta.dir, "..", "..", ...STAGING_DIR.split("/"), `${PACKAGE_NAME}-${PACKAGE_VERSION}.tgz`)
+  : resolve(PINNED_TARBALL);
 
 describe("packaged artifact", () => {
   test.skipIf(INSTALL === undefined || INSTALL === "")(
-    "the packed tarball's owner Remote is reachable through a real gateway invoke",
+    "every packaged endpoint is reachable, and the four retired v1 entries refuse without writing",
     async () => {
       // Rebuild so the assertion is about the artifact this tree produces.
       const root = join(import.meta.dir, "..", "..");
@@ -118,10 +122,6 @@ describe("packaged artifact", () => {
 
       const archiveRoot = join(workspace, "archive");
       process.env.DSH_ENSEMBLE_ARCHIVE_ROOT = archiveRoot;
-      // The deployment states the world it runs in, and evidences the source as
-      // the same one. Both write entries run the same admission, so without this
-      // the packaged `initialize` would be refused — which is the correct
-      // behaviour, not the one this test is about.
       process.env.DSH_ENSEMBLE_ARCHIVE_WORLD = "host-local";
       pkg.apply(ctx);
 
@@ -139,33 +139,48 @@ describe("packaged artifact", () => {
 
       const binding = { worldIdentity: "host-local", canonicalAddress: "/home/u/p", nativeWorkspaceRef: "ws:1" };
 
-      // Every endpoint is reachable: none may fail with gateway/signature-invalid,
-      // which is the packaging defect this test exists for.
-      const before = (await call("status", {}, "owner")) as { ok: boolean; value?: { archiveInitialized: boolean } };
-      expect(before.ok).toBe(true);
-      expect(before.value?.archiveInitialized).toBe(false);
+      // 1. The v2 product entries are on the wire and reach their handler. No
+      //    native services are mounted in this fixture, so they report
+      //    themselves unavailable; what matters is that the emitted method is
+      //    parseable by the gateway. An unparseable one fails before the handler
+      //    with a signature error, which is the packaging defect this test
+      //    exists for.
+      for (const method of ["projects", "query", "manage", "choose", "approve", "environment"]) {
+        const answer = (await call(method, {}, "owner")) as { ok?: boolean; error?: { code?: string } };
+        expect(answer, `${method} must reach its handler`).toBeDefined();
+        expect(answer.ok, `${method} should answer, not throw`).toBe(false);
+        expect(["storage_unavailable", "invalid_input"]).toContain(answer.error?.code as string);
+      }
 
-      const initialized = (await call(
-        "initialize",
-        { source_descriptor: binding, initial_grants: [{ subjectId: "owner", rights: ["manage"] }] },
-        "owner",
-      )) as { ok: boolean; value?: { committedRevision: string } };
-      expect(initialized.ok).toBe(true);
-      const revision = initialized.value?.committedRevision as string;
-      expect(revision).toMatch(/^[0-9a-f]{40}$/);
+      // 2. The four v1 entries are retired: authenticated, they refuse with a
+      //    migration instruction rather than creating a second store.
+      for (const [method, request] of [
+        ["initialize", { source_descriptor: binding, initial_grants: [{ subjectId: "owner", rights: ["manage"] }] }],
+        ["bind", { source_descriptor: binding, reason: "x", expected_revision: "0".repeat(40) }],
+        ["status", {}],
+        ["readBack", { revision: "0".repeat(40), path: "meta.json" }],
+      ] as const) {
+        const answer = (await call(method, request, "owner")) as {
+          ok: boolean;
+          error?: { code: string; message: string };
+          code?: string;
+          reason?: string;
+        };
+        expect(answer.ok, `${method} must be refused`).toBe(false);
+        const code = answer.error?.code ?? answer.code;
+        const message = answer.error?.message ?? answer.reason ?? "";
+        expect(code, `${method} refusal code`).toBe("unsupported_version");
+        expect(message).toContain(`ensembleArchive.${method} is retired in 1.0`);
+        expect(message).toContain(method === "initialize" || method === "bind" ? "manage" : "query");
+      }
 
-      const readBack = (await call("readBack", { revision, path: "meta.json" }, "owner")) as {
-        ok: boolean;
-        value?: { content: string };
-      };
-      expect(readBack.ok).toBe(true);
-      expect(readBack.value?.content).toContain("ensemble-archive/v1");
+      // 3. Nothing was created: no archive root, no registry, no files at all.
+      expect(existsSync(archiveRoot)).toBe(false);
 
-      // The guard still behaves through the packaged path.
+      // 4. The owner guard still runs, on the retired entries too.
       await expect(call("status", {}, "share-viewer")).rejects.toThrow();
-      const forged = (await call("status", { owner: true, actor: "x" }, "owner")) as { ok: boolean; code?: string };
+      const forged = (await call("initialize", { owner: true, actor: "x" }, "owner")) as { ok: boolean };
       expect(forged.ok).toBe(false);
-      expect(forged.code).toBe("invalid_input");
 
       rmSync(workspace, { recursive: true, force: true });
     },

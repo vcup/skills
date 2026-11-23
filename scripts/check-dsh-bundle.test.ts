@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
+  BUNDLE_ENTRY,
   BUNDLE_OUTPUT,
   BUNDLE_PROVENANCE,
   renderBundle,
@@ -54,6 +55,9 @@ function fixture(options: {
   const root = temporaryRoot();
   mkdirSync(join(root, "adapters/dsh/lib"), { recursive: true });
   mkdirSync(join(root, "adapters/dsh/bin"), { recursive: true });
+  mkdirSync(join(root, "scripts"));
+  writeFileSync(join(root, BUNDLE_ENTRY), readFileSync(join(REPO_ROOT, BUNDLE_ENTRY)));
+  writeFileSync(join(root, "scripts/build-dsh-bundle.ts"), readFileSync(join(REPO_ROOT, "scripts/build-dsh-bundle.ts")));
   const base = committed();
   const code = options.code ?? base.code;
   const provenance = options.provenance ?? base.provenance;
@@ -81,6 +85,39 @@ describe("checkBundle", () => {
     expect(verdict.ok).toBe(true);
   });
 
+  test("a reviewed transport edit requires regeneration even when the bundle is untouched", () => {
+    const root = fixture();
+    writeFileSync(join(root, BUNDLE_ENTRY), readFileSync(join(root, BUNDLE_ENTRY), "utf8") + "\n// changed source\n");
+    const verdict = checkBundle({ root });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.problems.join(" ")).toContain("reviewed transport source");
+  });
+
+  test("a generator edit requires regeneration", () => {
+    const root = fixture();
+    writeFileSync(join(root, "scripts/build-dsh-bundle.ts"), "// changed generator\n");
+    const verdict = checkBundle({ root });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.problems.join(" ")).toContain("generator");
+  });
+
+  test("actual bare imports cannot be hidden by a dishonest externals list", () => {
+    const base = committed();
+    const code = base.code + '\nimport "unlisted-dependency";\n';
+    const provenance = { ...base.provenance, bytes: Buffer.byteLength(code), sha256: createHash("sha256").update(code).digest("hex") };
+    const verdict = checkBundle({ root: fixture({ code, provenance }) });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.problems.join(" ")).toContain("unlisted-dependency");
+  });
+
+  test("malformed provenance is a failed check rather than a checker crash", () => {
+    for (const text of ["null", "{}", '{"format":"dsh-cli-bundle/v2"}']) {
+      const root = fixture();
+      writeFileSync(join(root, BUNDLE_PROVENANCE), text);
+      expect(checkBundle({ root }).ok).toBe(false);
+    }
+  });
+
   test("a missing bundle is reported, not treated as an empty pass", () => {
     const verdict = checkBundle({ root: fixture({ omitBundle: true }) });
     expect(verdict.ok).toBe(false);
@@ -99,7 +136,7 @@ describe("checkBundle", () => {
   test("a bundle that still needs a bare import is refused", () => {
     const base = committed();
     // The exact defect: a transport that needs a resolver the CLI does not have.
-    const leaky = `${base.code}\nimport { Context } from "@deepseek-ai/cordis";\n`;
+    const leaky = `${base.code}\nimport { Context as LeakedContext } from "@deepseek-ai/cordis";\n`;
     const provenance: BundleProvenance = {
       ...base.provenance,
       bytes: Buffer.byteLength(leaky, "utf8"),

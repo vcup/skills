@@ -14,12 +14,19 @@
  *
  * The staging root is `build/pack/dsh` (git-ignored). Nothing is published.
  *
+ * A successful run also prints two things that are part of the contract, not
+ * decoration: an immutable digest-addressed copy under `build/pack/candidates/`,
+ * and the sha256 of the packaged `index.js`, `client.js` and CLI. Quoting those
+ * is how a verification result can be tied to exact bytes even after the next
+ * repack rewrites the shared path.
+ *
  * @module scripts/pack-dsh
  */
 
 import { createHash } from "node:crypto";
+import ts from "typescript";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,9 +38,10 @@ import {
 } from "../adapters/dsh/compatibility.ts";
 import {
   CAPABILITY_STATUS,
+  CLIENT_INJECT,
   PEER_DEPENDENCIES,
-  PROBE_PACKAGE_NAME,
-  PROBE_VERSION,
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
   REFERENCE_RESOURCES,
   SKILL_DIR,
   SKILL_FILE,
@@ -93,6 +101,7 @@ export function packageAllowlist(): string[] {
     "bundle-manifest.json",
     "cordis.patch.yml",
     "index.js",
+    "client.js",
     "lib/cookie-jar.mjs",
     "lib/transport.bundle.json",
     "lib/transport.bundle.mjs",
@@ -105,27 +114,21 @@ export function packageAllowlist(): string[] {
 /** The bundle patch: one row naming this package. */
 export function bundlePatch(): string {
   return [
-    "# dsh-ensemble-probe bundle layer.",
-    "# One Host plugin row: it registers the bundled `ensemble` skill provider",
-    "# (user-invocable only) and the `ensemble_reference` read-back tool.",
-    "# No Client row, no archive row, no model-selection row.",
+    "# dsh-ensemble Host and web Client bundle layer.",
     "- insert:",
-    `    - id: ${PROBE_PACKAGE_NAME}`,
-    `      name: ${PROBE_PACKAGE_NAME}`,
+    `    - id: ${PACKAGE_NAME}`,
+    `      name: ${PACKAGE_NAME}`,
     "",
   ].join("\n");
 }
 
 /** The package manifest for the staged bundle. */
-export function packageManifest(contentFiles: readonly BuildFile[]): Record<string, unknown> {
+export function packageManifest(contentFiles: readonly BuildFile[]) {
   return {
-    name: PROBE_PACKAGE_NAME,
-    version: PROBE_VERSION,
-    private: true,
-    description:
-      "Host-only DSH probe: user-invocable ensemble skill, a fixed-enumeration reference reader, " +
-      `and an owner-only archive Remote with its CLI. Tested against DSH ${supportedVersionsText()}. ` +
-      "Not the ensemble product.",
+    name: PACKAGE_NAME,
+    version: PACKAGE_VERSION,
+    description: `Managed ensemble coordination, versioned archives and reviewed learning for DSH ${supportedVersionsText()}.`,
+    repository: { type: "git", url: "https://github.com/vcup/skills.git" },
     type: "module",
     main: "index.js",
     // The CLI is the reason this package has a `bin` at all: the owner archive
@@ -134,12 +137,14 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     bin: { "ensemble-archive": "./bin/ensemble-archive.js" },
     exports: {
       ".": "./index.js",
-      "./transport": "./lib/transport.mjs",
+      "./client": "./client.js",
+      "./transport": "./lib/transport.bundle.mjs",
       "./cookie": "./lib/cookie-jar.mjs",
       "./package.json": "./package.json",
     },
     files: [
       "index.js",
+      "client.js",
       "cordis.patch.yml",
       "bundle-manifest.json",
       "README.md",
@@ -147,7 +152,7 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
       "lib/",
       `${SKILL_DIR}/`,
     ],
-    engines: { dsh: ENGINES_DSH },
+    engines: { dsh: ENGINES_DSH, node: ">=24.9.0" },
     // Every package the Host entry imports is a peer, and there is no ordinary
     // `dependencies` entry at all. That is the point: the Host supplies these
     // shared instances through its own resolver, and the CLI carries its own
@@ -156,9 +161,8 @@ export function packageManifest(contentFiles: readonly BuildFile[]): Record<stri
     // second connection into the profile, shadowing the Host's.
     peerDependencies: { ...PEER_DEPENDENCIES },
     devDependencies: { ...PEER_DEPENDENCIES },
-    dsh: { bundle: { patch: "./cordis.patch.yml" } },
-    probe: {
-      status: "host-only-probe",
+    dsh: { bundle: { patch: "./cordis.patch.yml" }, client: { platform: "web", inject: [...CLIENT_INJECT] } },
+    ensemble: {
       // What this version actually does, stated in the installed manifest so a
       // reader does not have to infer it from the source.
       capabilities: { ...CAPABILITY_STATUS },
@@ -218,6 +222,47 @@ export function assertNoCrossPathTokens(path: string, text: string): void {
   }
 }
 
+/** Verify the exact output before any recursive removal. */
+async function validateOutput(root: string, output: string): Promise<void> {
+  const source = resolve(root);
+  const target = resolve(output);
+  const inside = (parent: string, child: string): boolean => {
+    const rel = relative(parent, child);
+    return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !rel.startsWith(sep));
+  };
+  if (inside(target, source)) fail("staging output cannot be the source root or one of its ancestors");
+  if (inside(source, target) && target !== join(source, STAGING_DIR)) {
+    fail(`staging inside the source is limited to ${STAGING_DIR}`);
+  }
+  for (let path = target; ; path = dirname(path)) {
+    try {
+      const entry = await lstat(path);
+      if (entry.isSymbolicLink()) fail(`staging output has a symbolic link at ${path}`);
+      if (!entry.isDirectory()) fail(`staging output ancestor is not a directory: ${path}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (dirname(path) === path) break;
+  }
+  let entries: string[];
+  try {
+    entries = await readdir(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (entries.length === 0) return;
+  try {
+    const marker = join(target, "bundle-manifest.json");
+    const entry = await lstat(marker);
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error("not a regular marker");
+    const manifest = JSON.parse(await readFile(marker, "utf8")) as { package?: unknown };
+    if (manifest.package !== PACKAGE_NAME && manifest.package !== "dsh-ensemble-probe") throw new Error("different package");
+  } catch {
+    fail(`refusing to replace an unmanaged nonempty staging directory: ${target}`);
+  }
+}
+
 /**
  * Stage the package into `build/pack/dsh`.
  *
@@ -230,7 +275,8 @@ export async function stage(
   options: { root?: string; stagingDir?: string } = {},
 ): Promise<StageResult> {
   const root = options.root ?? REPO_ROOT;
-  const stagingDir = options.stagingDir ?? join(root, STAGING_DIR);
+  const stagingDir = resolve(options.stagingDir ?? join(root, STAGING_DIR));
+  await validateOutput(root, stagingDir);
 
   const content = await dshContent();
 
@@ -263,9 +309,9 @@ export async function stage(
     ),
   );
   const bundleManifest = {
-    package: PROBE_PACKAGE_NAME,
-    version: PROBE_VERSION,
-    engines: { dsh: ENGINES_DSH },
+    package: PACKAGE_NAME,
+    version: PACKAGE_VERSION,
+    engines: { dsh: ENGINES_DSH, node: ">=24.9.0" },
     capabilities: { ...CAPABILITY_STATUS },
     // The tested set is recorded in the artifact so an installed package can be
     // audited without reading this repository: `engines.dsh` alone does not say
@@ -282,7 +328,8 @@ export async function stage(
 
   const entry = await buildEntry(root);
   await writeFile(join(stagingDir, "index.js"), entry);
-  staged.push("index.js");
+  await writeFile(join(stagingDir, "client.js"), await buildClient(root));
+  staged.push("index.js", "client.js");
 
   // The CLI and its cookie reader are copied verbatim: they are Node ESM already,
   // and rewriting them would put a build step between the reviewed source and
@@ -322,24 +369,41 @@ export async function stage(
   return { stagingDir, files: onDisk, manifest: packageManifest(content), contentDigest };
 }
 
-/**
- * The modules the packaged entry is emitted from.
- *
- * Declared rather than discovered: the package ships exactly these, and the
- * allowlist assertion in `stage()` would catch a change anyway.
- */
-const PACKAGED_MODULES = [
-  "index.ts",
-  "archive.ts",
-  "compatibility.ts",
-  "meta.ts",
-  "owner.ts",
-  "owner-remote.ts",
-  "owner-service.ts",
-  "records.ts",
-  "reference.ts",
-  "skill.ts",
-] as const;
+/** Relative imports determine the source closure; no scratch or test source can enter. */
+async function sourceClosure(root: string, entry: string): Promise<string[]> {
+  const seen = new Set<string>();
+  const pending = [entry];
+  while (pending.length) {
+    const name = pending.pop()!;
+    if (seen.has(name)) continue;
+    if ((!name.startsWith("adapters/dsh/") && !name.startsWith("modules/ensemble/")) ||
+        name.includes("/client/") || name.includes("/probes/") || name.endsWith(".test.ts")) {
+      fail(`Host source import escapes its maintained module trees: ${name}`);
+    }
+    const path = join(root, name);
+    if (!(await lstat(path)).isFile() || await realpath(path) !== resolve(path)) fail(`source is not a regular file without symlink ancestors: ${name}`);
+    seen.add(name);
+    const source = await readFile(path, "utf8");
+    for (const imported of ts.preProcessFile(source, true, true).importedFiles) {
+      if (!imported.fileName.startsWith(".")) continue;
+      const target = resolve(dirname(path), imported.fileName);
+      if (!target.endsWith(".ts")) fail(`unreviewed relative Host import: ${imported.fileName}`);
+      pending.push(relative(root, target).split(sep).join("/"));
+    }
+  }
+  return [...seen].sort();
+}
+
+async function buildClient(root: string): Promise<string> {
+  const result = await Bun.build({
+    entrypoints: [join(root, "adapters/dsh/client/index.tsx")], target: "browser", format: "cjs",
+    jsx: { runtime: "automatic", development: false },
+    external: ["@deepseek-ai/*", "react", "react/jsx-runtime"], minify: false,
+  });
+  if (!result.success || result.outputs.length !== 1) fail(`Client build failed: ${result.logs.map(String).join("; ")}`);
+  const code = await result.outputs[0]!.text();
+  return `window.__ModuleLoader__.load({id:${JSON.stringify(PACKAGE_NAME)},factory(require){const module={exports:{}};const exports=module.exports;\n${code}\nreturn module.exports;}});\n`;
+}
 
 /**
  * Emit the plugin entry to one ESM file with `tsc`, then bundle that output.
@@ -367,8 +431,10 @@ async function buildEntry(root: string): Promise<string> {
 
   const scratch = await mkdtemp(join(tmpdir(), "pack-dsh-emit-"));
   try {
-    for (const name of PACKAGED_MODULES) {
-      await copyFile(join(root, "adapters/dsh", name), join(scratch, name));
+    const modules = await sourceClosure(root, "adapters/dsh/index.ts");
+    for (const name of modules) {
+      await mkdir(dirname(join(scratch, name)), { recursive: true });
+      await copyFile(join(root, name), join(scratch, name));
     }
     await writeFile(join(scratch, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
 
@@ -383,7 +449,8 @@ async function buildEntry(root: string): Promise<string> {
         "--skipLibCheck",
         "--rewriteRelativeImportExtensions",
         "--outDir", join(scratch, "out"),
-        ...PACKAGED_MODULES,
+        "--rootDir", scratch,
+        ...modules,
       ],
       { cwd: scratch, stdout: "pipe", stderr: "pipe" },
     );
@@ -392,7 +459,7 @@ async function buildEntry(root: string): Promise<string> {
     }
 
     const bundled = await Bun.build({
-      entrypoints: [join(scratch, "out", "index.js")],
+      entrypoints: [join(scratch, "out", "adapters/dsh/index.js")],
       target: "node",
       format: "esm",
       external: ["@deepseek-ai/*"],
@@ -403,7 +470,12 @@ async function buildEntry(root: string): Promise<string> {
     }
     const output = bundled.outputs[0];
     if (output === undefined) fail("bun build produced no output for the emitted entry");
-    const text = await output.text();
+    // Bun emits source-location comments containing the random scratch root.
+    // Normalize only those whole-line generated comments, never executable text.
+    const text = (await output.text()).replace(
+      /^\/\/ [^\r\n]*\/pack-dsh-emit-[^/\r\n]+\/out\/([^\r\n]+)$/gm,
+      "// $1",
+    );
 
     // A mangled decorator form is a packaging defect that only shows up when a
     // Remote is invoked, so refuse to ship it rather than discover it later.
@@ -414,14 +486,9 @@ async function buildEntry(root: string): Promise<string> {
       );
     }
 
-    const foreign = [...text.matchAll(/from\s+"([^"]+)"/g)]
-      .map((match) => match[1] as string)
-      .filter(
-        (specifier) =>
-          !specifier.startsWith("node:") &&
-          !specifier.startsWith("@deepseek-ai/") &&
-          !specifier.startsWith("./"),
-      );
+    const imports = new Bun.Transpiler({ loader: "js" }).scanImports(text);
+    const foreign = imports.map(item => item.path).filter(specifier =>
+      !specifier.startsWith("node:") && !(specifier in PEER_DEPENDENCIES));
     if (foreign.length > 0) {
       fail(`bundled entry has unexpected external imports: ${foreign.join(", ")}`);
     }
@@ -429,6 +496,82 @@ async function buildEntry(root: string): Promise<string> {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/** Where every produced tarball is additionally kept, addressed by its digest. */
+export const CANDIDATES_DIR = "build/pack/candidates";
+
+/**
+ * Files whose digest must be quoted whenever a candidate is handed to someone
+ * who will verify against it.
+ *
+ * A tarball digest alone has already caused a wasted round in this repository:
+ * one report called the artifact "pre-fix" while a driver called the same path
+ * "green", because the two were hashing different bytes at different times. The
+ * digest of the files an installer or a Loader actually executes (the Host
+ * entry, the Client factory, the CLI) cannot be ambiguous that way.
+ */
+export const IDENTITY_FILES = ["index.js", "client.js", "bin/ensemble-archive.js"] as const;
+
+/** One file's identity, read from the tarball rather than from the staging tree. */
+export interface EntryIdentity {
+  readonly path: string;
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+/**
+ * Read the identity of the packaged entry files out of the produced tarball.
+ *
+ * Reading from the archive — not from the staging directory — is the point: the
+ * digests describe what an installer receives after unpacking.
+ * @param tarball - the produced `.tgz`.
+ * @returns one digest per {@link IDENTITY_FILES} entry.
+ */
+export function readEntryIdentity(tarball: string): EntryIdentity[] {
+  return IDENTITY_FILES.map((path) => {
+    const extracted = Bun.spawnSync(["tar", "-xzOf", tarball, `package/${path}`], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (extracted.exitCode !== 0) {
+      fail(`could not read package/${path} from ${tarball}: ${extracted.stderr.toString()}`);
+    }
+    const bytes = new Uint8Array(extracted.stdout);
+    return { path, sha256: sha256(bytes), bytes: bytes.byteLength };
+  });
+}
+
+/**
+ * Keep an immutable copy of a produced tarball, addressed by its digest.
+ *
+ * The shared staging path (`build/pack/dsh/dsh-ensemble-1.0.0.tgz`) is rewritten
+ * on every pack, so anyone who pinned its bytes can be invalidated by an
+ * unrelated repack. A digest-addressed copy cannot be invalidated that way, and
+ * writing it never destroys an earlier candidate: a different digest is a
+ * different name. An existing name must hold the same bytes; a mismatch would
+ * mean this script produced two archives under one digest.
+ * @param root - repository root.
+ * @param tarball - the packed tarball.
+ * @param digest - the tarball's sha256.
+ * @returns the candidate path.
+ */
+export async function keepCandidate(root: string, tarball: string, digest: string): Promise<string> {
+  const dir = join(root, CANDIDATES_DIR);
+  await mkdir(dir, { recursive: true });
+  const candidate = join(dir, `${PACKAGE_NAME}-${PACKAGE_VERSION}-${digest.slice(0, 12)}.tgz`);
+  const bytes = await readFile(tarball);
+  if (existsSync(candidate)) {
+    if (sha256(await readFile(candidate)) !== digest) {
+      fail(`candidate ${packageRelative(root, candidate)} already exists with different bytes`);
+    }
+    return candidate;
+  }
+  await writeFile(candidate, bytes);
+  if (sha256(await readFile(candidate)) !== digest) {
+    fail(`candidate copy ${packageRelative(root, candidate)} does not match the packed digest`);
+  }
+  return candidate;
 }
 
 /**
@@ -439,14 +582,20 @@ async function buildEntry(root: string): Promise<string> {
  * allowlist, and it produces the `package/`-prefixed gzip tarball that
  * `dsh plugin add ./x.tgz` expects.
  * @param options - repository root and staging root overrides (tests).
- * @returns the tarball path and its sha256.
+ * @returns the tarball path, its sha256, the unpacked entry identity and the staged result.
  */
 export async function pack(
   options: { root?: string; stagingDir?: string } = {},
-): Promise<{ tarball: string; sha256: string; staged: StageResult }> {
+): Promise<{
+  tarball: string;
+  sha256: string;
+  entry: readonly EntryIdentity[];
+  candidate: string;
+  staged: StageResult;
+}> {
   const root = options.root ?? REPO_ROOT;
   const staged = await stage({ ...options, root });
-  const tarball = join(staged.stagingDir, `${PROBE_PACKAGE_NAME}-${PROBE_VERSION}.tgz`);
+  const tarball = join(staged.stagingDir, `${PACKAGE_NAME}-${PACKAGE_VERSION}.tgz`);
 
   const process = Bun.spawnSync(["npm", "pack", "--pack-destination", staged.stagingDir], {
     cwd: staged.stagingDir,
@@ -458,7 +607,7 @@ export async function pack(
     fail(`npm pack failed in ${staged.stagingDir}: ${process.stderr.toString() || process.stdout.toString()}`);
   }
   const produced = (await readdir(staged.stagingDir)).filter((entry) => entry.endsWith(".tgz"));
-  if (produced.length !== 1 || produced[0] !== `${PROBE_PACKAGE_NAME}-${PROBE_VERSION}.tgz`) {
+  if (produced.length !== 1 || produced[0] !== `${PACKAGE_NAME}-${PACKAGE_VERSION}.tgz`) {
     fail(`npm pack produced unexpected archives: ${produced.join(", ") || "(none)"}`);
   }
   // `npm pack` writes its cache beside the tarball only when asked; remove it so
@@ -466,7 +615,12 @@ export async function pack(
   await rm(join(staged.stagingDir, ".npm-cache"), { recursive: true, force: true });
   if (!(await Bun.file(tarball).exists())) fail(`npm pack did not create ${tarball}`);
 
-  return { tarball, sha256: sha256(await readFile(tarball)), staged };
+  const digest = sha256(await readFile(tarball));
+  // Read identity and keep the immutable copy from the produced archive, so a
+  // caller who quotes a digest is quoting what an installer receives.
+  const entry = readEntryIdentity(tarball);
+  const candidate = await keepCandidate(root, tarball, digest);
+  return { tarball, sha256: digest, entry, candidate, staged };
 }
 
 async function listFiles(dir: string, prefix = ""): Promise<string[]> {
@@ -497,5 +651,9 @@ if (import.meta.main) {
     console.log(
       `packed ${result.staged.files.length} files -> ${packageRelative(REPO_ROOT, result.tarball)} (sha256 ${result.sha256})`,
     );
+    console.log(`candidate ${packageRelative(REPO_ROOT, result.candidate)}`);
+    for (const entry of result.entry) {
+      console.log(`entry ${entry.path} sha256 ${entry.sha256} (${entry.bytes} bytes)`);
+    }
   }
 }

@@ -7,7 +7,7 @@
  * this check runs in `make check` and fails loudly.
  *
  * It verifies what can be verified **offline**: the file's digest against the
- * provenance, the closure rules (no bare imports but Node builtins, no Host-side
+ * provenance and the reviewed source/generator digests, the closure rules (no bare imports but Node builtins, no Host-side
  * package inlined), and that the shipped entry point actually imports the
  * bundle. It deliberately does *not* rebuild: rebuilding needs a DSH install, and
  * the offline gate must not require one. Regeneration is `make dsh-bundle`.
@@ -19,7 +19,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assertBundleClosure,
   BUNDLE_OUTPUT,
   BUNDLE_PROVENANCE,
   readCommittedBundle,
@@ -54,34 +53,13 @@ export function checkBundle(options: { root?: string } = {}): BundleCheck {
 
   let provenance: BundleProvenance;
   try {
-    provenance = JSON.parse(readFileSync(provenancePath, "utf8")) as BundleProvenance;
+    provenance = readCommittedBundle({ root }).provenance;
   } catch (error) {
     return {
       ok: false,
-      problems: [`${BUNDLE_PROVENANCE} is not valid JSON: ${(error as Error).message}`],
-      summary: "the CLI bundle provenance is unreadable",
+      problems: [(error as Error).message],
+      summary: "the CLI bundle or its provenance is invalid",
     };
-  }
-  if (provenance.format !== "dsh-cli-bundle/v1") {
-    problems.push(`${BUNDLE_PROVENANCE} has format ${JSON.stringify(provenance.format)}, expected "dsh-cli-bundle/v1"`);
-  }
-
-  try {
-    readCommittedBundle({ root });
-  } catch (error) {
-    problems.push((error as Error).message);
-  }
-
-  // The closure rules again, on the file as committed: `readCommittedBundle`
-  // checks them for the digest it verified, and this repeats them for a reader
-  // who only has the file.
-  if (problems.length === 0) {
-    const body = readFileSync(codePath, "utf8").split("\n\n").slice(1).join("\n\n");
-    try {
-      assertBundleClosure(body, provenance);
-    } catch (error) {
-      problems.push((error as Error).message);
-    }
   }
 
   // The shipped entry point must import the bundle. A bin that still imports the

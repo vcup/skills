@@ -1,0 +1,54 @@
+{
+  "//": "The Client program: the whole adapters/dsh/client directory. The Client is browser code — it needs JSX, the DOM lib and React — so it is its own program and a DOM global in a Host module stays a real error. It is compiled against the official type versions (React at the major the official client plugins declare, and the published slot package at exactly the install's release), never against the repository's own React.",
+  "//coverage": "Compiled by adapters/dsh/typecheck-host.ts --client-types; `scripts/check-type-coverage.ts` fails when a Client module is missing from this program.",
+  "//usage": "bun adapters/dsh/typecheck-host.ts <isolated-install-dir> --client-types <dir>",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node",
+      "bun"
+    ]
+  },
+  "include": [
+    "client/controller.test.ts",
+    "client/controller.ts",
+    "client/environment.tsx",
+    "client/gate-failure.test.ts",
+    "client/gate-failure.ts",
+    "client/host-preflight.test.ts",
+    "client/host-preflight.ts",
+    "client/index.tsx",
+    "client/initialize-grant.test.ts",
+    "client/locales.ts",
+    "client/management.test.ts",
+    "client/management.ts",
+    "client/protocol.test.ts",
+    "client/protocol.ts",
+    "client/registry-seam.test.ts",
+    "client/registry-seam.ts",
+    "client/remote.ts",
+    "client/served-client.test.ts",
+    "client/served-client.ts",
+    "client/verify-auth.test.ts",
+    "client/verify-auth.ts",
+    "client/verify-browser.ts",
+    "client/verify-fresh-journey.test.ts",
+    "client/verify-fresh-journey.ts",
+    "client/workspace.tsx",
+    "client/workspaces.test.ts",
+    "client/workspaces.ts"
+  ]
+}

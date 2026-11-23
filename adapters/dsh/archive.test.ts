@@ -15,9 +15,10 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   ARCHIVE_ROOT_ENV,
   archivePolicy,
@@ -40,9 +41,86 @@ function temporaryRoot(): string {
   return root;
 }
 
+/** Every prefix assigned by `mkdtempSync` or by the positive control in this file. */
+const OWNED_PREFIXES = ["archive-test-", "dsh-archive-escape-", "archive-temp-grant-"] as const;
+
 afterAll(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) {
+    // Only what this file registered is removed, and only when the path is absolute and its OWN
+    // basename starts with a prefix this file assigns. Checking the basename - not any ancestor
+    // segment - keeps the claim in this comment true rather than incidentally true.
+    const base = basename(root);
+    if (!isAbsolute(root) || !OWNED_PREFIXES.some((prefix) => base.startsWith(prefix))) continue;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
+
+/** True when `child` is `parent` itself or lives underneath it. */
+function isWithin(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * The roots a confined child really may write to, read from the argv the backend emits rather than
+ * from a helper's description of the policy. The distinction is not academic: `writableRoots()`
+ * advertises `/tmp` AND `os.tmpdir()`, while the Landlock profile actually grants only `/tmp` plus
+ * the workspace. Trusting the helper makes a target under `TMPDIR=/var/tmp` look writable when the
+ * confined child cannot write there at all.
+ *
+ * Only the launcher's own options are read: everything after `--` is the command being run, and
+ * treating those arguments as grants would turn a command path into a fake writable root.
+ */
+function grantedWriteRoots(confined: { readonly argv: readonly string[] }): string[] {
+  const roots: string[] = [];
+  const separator = confined.argv.indexOf("--");
+  const end = separator === -1 ? confined.argv.length : separator;
+  for (let index = 0; index < end; index += 1) {
+    const arg = confined.argv[index];
+    if (arg === "--rw") {
+      // Landlock launcher: `--rw <root>`.
+      const value = confined.argv[index + 1];
+      if (value !== undefined) roots.push(resolve(value));
+      index += 1;
+    } else if (arg === "--bind") {
+      // Bubblewrap: `--bind <source> <destination>`. The writable root is the DESTINATION inside the
+      // sandbox, so reading the source would be wrong whenever the two differ.
+      const destination = confined.argv[index + 2];
+      if (destination !== undefined) roots.push(resolve(destination));
+      index += 2;
+    } else if (arg === "--tmpfs") {
+      // Bubblewrap: `--tmpfs <mountpoint>` - writable, but a private empty filesystem.
+      const value = confined.argv[index + 1];
+      if (value !== undefined) roots.push(resolve(value));
+      index += 1;
+    }
+  }
+  // `/dev/null` is a device, not a directory a test can put a file into.
+  return roots.filter((root) => root !== "/dev/null");
+}
+
+/**
+ * Creates a directory no measured grant contains, so a confined write there really is an escape.
+ * Candidates are checked against the measured grants and then created with `mkdtemp`, so this test
+ * only ever removes a root it made itself. Whether the OS lets this process write there is a
+ * separate fact, proven by the preflight write in the test body - never conflated with the sandbox
+ * verdict.
+ */
+function createEscapeRoot(granted: readonly string[]): string | undefined {
+  // Ordered by preference, not assumption: `/dev/shm` and `/run` matter on hosts whose home and
+  // `/var/tmp` are read-only.
+  const candidates = [homedir(), ...(process.platform === "win32" ? [] : ["/var/tmp", "/dev/shm", "/run"])];
+  for (const candidate of candidates) {
+    if (granted.some((root) => isWithin(resolve(candidate), root))) continue;
+    try {
+      // `mkdtemp` appends its suffix to the string it is given, so pass a parent plus a prefix.
+      const created = mkdtempSync(join(candidate, "dsh-archive-escape-"));
+      roots.push(created);
+      return created;
+    } catch { /* Not writable here; try the next candidate. */ }
+  }
+  return undefined;
+}
 
 describe("environment scrub", () => {
   test("every GIT_ variable is stripped, including the ones that redirect the repository", () => {
@@ -145,6 +223,72 @@ describe("fixed argv", () => {
     for (const bad of ["../outside", "/etc/passwd", "records//x", ""]) {
       expect(() => gitArgv({ kind: "read-tree-path", revision, path: bad })).toThrow(SeamUnavailableError);
     }
+  });
+});
+
+/**
+ * The grant parser is exercised against synthetic argv because only one backend is installed on any
+ * given host. This does not claim the other backends were run: it pins the argv *reading* rules the
+ * live Landlock case depends on, and records what bubblewrap's flags mean.
+ */
+describe("confined argv grant parsing", () => {
+  test("bubblewrap --bind is read as its destination, not its source", () => {
+    // --bind <source> <destination>: a differing source must not be reported as writable.
+    const roots = grantedWriteRoots({ argv: ["bwrap", "--bind", "/host/source", "/sandbox/target", "--", "sh", "-c", "true"] });
+    expect(roots).toContain(resolve("/sandbox/target"));
+    expect(roots).not.toContain(resolve("/host/source"));
+  });
+
+  test("bubblewrap --tmpfs is reported as a writable mount point", () => {
+    expect(grantedWriteRoots({ argv: ["bwrap", "--tmpfs", "/tmp", "--", "sh"] })).toContain(resolve("/tmp"));
+  });
+
+  test("the command after -- is never mistaken for a grant", () => {
+    const roots = grantedWriteRoots({ argv: ["landlock-run", "--rw", "/workspace", "--", "--rw", "/etc", "sh"] });
+    expect(roots).toEqual([resolve("/workspace")]);
+    expect(roots).not.toContain(resolve("/etc"));
+  });
+
+  test("landlock --rw is read and /dev/null is not treated as a directory", () => {
+    const roots = grantedWriteRoots({ argv: ["landlock-run", "--ro", "/", "--rw", "/dev/null", "--rw", "/tmp", "--rw", "/ws", "--", "sh"] });
+    expect(roots).toEqual([resolve("/tmp"), resolve("/ws")]);
+  });
+
+  test("the positive-control script creates its own directory before writing", () => {
+    // Under bubblewrap the policy mounts a private `--tmpfs /tmp`; anything the host pre-creates there
+    // is invisible to the child. A host-side `mkdir` would therefore leave the child with a missing
+    // parent directory, and the resulting non-zero exit would look like a sandbox denial. The command
+    // must create its own parent. This asserts the script text; the bwrap backend itself is not
+    // installed on this host, so the live case below only exercises Landlock.
+    const script = 'mkdir -p "$(dirname "$1")" && printf yes > "$1" && cat "$1"';
+    const dir = mkdtempSync(join(tmpdir(), "archive-temp-grant-"));
+    roots.push(dir);
+    const target = join(dir, "nested", "deeper", "x.txt");
+    expect(existsSync(join(dir, "nested"))).toBe(false);
+    const output = execFileSync("sh", ["-c", script, "sh", target], { encoding: "utf8" });
+    expect(output.trim()).toBe("yes");
+    expect(readFileSync(target, "utf8")).toBe("yes");
+  });
+
+  test("a target path containing a quote is passed positionally, not interpolated", () => {
+    // This is why the confined commands use `"$1"`: a host path may contain a quote, and interpolating
+    // it into the script turns a legitimate path into a shell syntax error - which would then look
+    // exactly like a sandbox denial and silently invert the assertion.
+    const quoted = join(tmpdir(), `archive-quote-${process.pid}-it's.txt`);
+    expect(quoted).toContain("'");
+    // Interpolation cannot express it safely:
+    expect(() => execFileSync("sh", ["-c", `printf no > '${quoted}'`], { stdio: "pipe" })).toThrow();
+    // Positional passing can, and the file lands at the literal path.
+    const dir = mkdtempSync(join(tmpdir(), "archive-quote-"));
+    roots.push(dir);
+    const target = join(dir, "it's.txt");
+    execFileSync("sh", ["-c", 'printf no > "$1"', "sh", target], { stdio: "pipe" });
+    expect(readFileSync(target, "utf8")).toBe("no");
+  });
+
+  test("a trailing option without its operand is ignored rather than throwing", () => {
+    expect(() => grantedWriteRoots({ argv: ["bwrap", "--bind", "/only-source"] })).not.toThrow();
+    expect(grantedWriteRoots({ argv: ["bwrap", "--bind", "/only-source"] })).toEqual([]);
   });
 });
 
@@ -355,24 +499,79 @@ describe("real isolated seam", () => {
       expect(head.enforcement).toBeDefined();
       expect(head.stdout.trim()).toBe("");
 
-      // A write outside the archive root is denied by the sandbox.
-      const outside = join(temporaryRoot(), "outside");
-      mkdirSync(outside);
-      writeFileSync(join(outside, "keep.txt"), "keep");
-      const escape = await group.sandbox.confine(["sh", "-c", `echo no > '${join(outside, "x.txt")}'`], {
-        mode: "workspace-write",
-        workspaceRoot: archiveRoot,
-      });
-      const handle = group.subprocess.spawn({
-        argv: escape.argv,
-        cwd: archiveRoot,
-        stdio: { stdin: "ignore", stdout: "collect", stderr: "collect" },
-        graceMs: 5000,
-        env: gitEnvironment(archiveRoot),
-      });
-      const outcome = await handle.done;
-      expect(outcome.exitCode).not.toBe(0);
-      expect(existsSync(join(outside, "x.txt"))).toBe(false);
+      // ---- Escape boundary ---------------------------------------------------------------
+      // "Outside" is defined by the grants the backend *emits*, not by a path we hope is outside.
+      // Measure them from a real confine() under the same mode the archive uses.
+      const probe = await group.sandbox.confine(["sh", "-c", "true"], { mode: "workspace-write", workspaceRoot: archiveRoot });
+      const grantedRoots = grantedWriteRoots(probe);
+      // The archive root must be among them, or this measurement means nothing.
+      expect(grantedRoots.some((root) => isWithin(resolve(archiveRoot), root))).toBe(true);
+
+      const outside = createEscapeRoot(grantedRoots);
+      expect(outside).toBeDefined();
+      if (outside !== undefined) {
+        // Preflight: prove the OS lets *this* process write here, so the later denial can only come
+        // from the sandbox. Deliberately separate from the confined verdict.
+        writeFileSync(join(outside, "preflight.txt"), "os-allows");
+        expect(existsSync(join(outside, "preflight.txt"))).toBe(true);
+
+        // The target is passed as a positional argument, never interpolated into the script: a host
+        // path may contain a quote, and a shell syntax error would look exactly like a denial.
+        const escapeTarget = join(outside, "x.txt");
+        const escape = await group.sandbox.confine(["sh", "-c", 'printf no > "$1"', "sh", escapeTarget], {
+          mode: "workspace-write",
+          workspaceRoot: archiveRoot,
+        });
+        const handle = group.subprocess.spawn({
+          argv: escape.argv,
+          cwd: archiveRoot,
+          stdio: { stdin: "ignore", stdout: "collect", stderr: "collect" },
+          graceMs: 5000,
+          env: gitEnvironment(archiveRoot),
+        });
+        const outcome = await handle.done;
+        // Both halves matter: a non-zero exit alone could come from a missing shell or a typo.
+        expect(outcome.exitCode).not.toBe(0);
+        expect(existsSync(escapeTarget)).toBe(false);
+      }
+
+      // ---- Positive control --------------------------------------------------------------
+      // The same policy must still allow a granted temp root, so "denied outside" cannot be met by a
+      // sandbox that denies everything. The grant is measured, not assumed: with TMPDIR=/var/tmp the
+      // Landlock profile still grants only `/tmp`, which is why this uses a measured grant rather
+      // than `tmpdir()`.
+      const tempGrant = grantedRoots.find((root) => root === resolve("/tmp"))
+        ?? grantedRoots.find((root) => !isWithin(resolve(archiveRoot), root) && root !== resolve(archiveRoot));
+      expect(tempGrant).toBeDefined();
+      if (tempGrant !== undefined) {
+        // The child creates its own directory and file. Required, not decoration: a bwrap
+        // `--tmpfs /tmp` hides anything the host pre-created there, so a host-side mkdir would leave
+        // the child with a missing parent and a non-zero exit that looks like a denial.
+        const grantedDir = join(tempGrant, `archive-temp-grant-${process.pid}-${Date.now()}`);
+        const grantedPath = join(grantedDir, "x.txt");
+        const granted = await group.sandbox.confine(
+          ["sh", "-c", 'mkdir -p "$(dirname "$1")" && printf yes > "$1" && cat "$1"', "sh", grantedPath],
+          { mode: "workspace-write", workspaceRoot: archiveRoot },
+        );
+        const grantedHandle = group.subprocess.spawn({
+          argv: granted.argv,
+          cwd: archiveRoot,
+          stdio: { stdin: "ignore", stdout: "collect", stderr: "collect" },
+          graceMs: 5000,
+          env: gitEnvironment(archiveRoot),
+        });
+        const grantedOutcome = await grantedHandle.done;
+        expect(grantedOutcome.exitCode).toBe(0);
+        // The child read its own bytes back, so the write is proven even when the backend mounts a
+        // private tmpfs that this host cannot see.
+        expect(grantedHandle.collected.stdout.readFrom(0).text.trim()).toBe("yes");
+        roots.push(grantedDir);
+        const usesPrivateTmpfs = granted.argv.some((arg, index) => arg === "--tmpfs" && granted.argv[index + 1] === "/tmp");
+        if (!usesPrivateTmpfs) {
+          expect(existsSync(grantedPath)).toBe(true);
+          expect(readFileSync(grantedPath, "utf8")).toBe("yes");
+        }
+      }
     },
     { timeout: 120_000 },
   );

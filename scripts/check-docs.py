@@ -33,7 +33,7 @@ from urllib.parse import unquote, urlsplit
 
 # Maintained trees: every Markdown file below these roots is checked.
 MAINTAINED_FILES = [
-    "README.md", "ROADMAP.md",
+    "README.md", "ROADMAP.md", "GLOSSARY.md",
     "adapters/dsh/README.md", "adapters/dsh/package-readme.md",
     "adapters/dsh-agent-wait/README.md", "adapters/dsh-agent-wait/package-readme.md",
     "adapters/omp/README.md", "adapters/omp/package/README.md",

@@ -254,7 +254,7 @@ describe('resolveWithin (fail-closed provider resolution)', () => {
         mkdirSync(join(dir, 'node_modules', name), { recursive: true });
         writeFileSync(join(dir, 'node_modules', name, 'package.json'), `{"version":"${version}"}`);
       }
-      const nested = join(dir, 'node_modules/dsh-ensemble-probe/node_modules/@deepseek-ai/dsh-skill');
+      const nested = join(dir, 'node_modules/dsh-ensemble/node_modules/@deepseek-ai/dsh-skill');
       mkdirSync(nested, { recursive: true });
       writeFileSync(join(nested, 'package.json'), '{"version":"0.2.2-rc.4"}');
 

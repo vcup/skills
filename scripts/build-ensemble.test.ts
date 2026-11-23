@@ -183,11 +183,14 @@ describe("path isolation", () => {
     expect(all).not.toContain("vcup/skills");
   });
 
-  test("the DSH artifact declares pre-release capability and offers no fallback", async () => {
+  test("the DSH artifact uses scoped domain tools and offers no file fallback", async () => {
     const result = await build("dsh");
     const all = result.files.map((file) => new TextDecoder().decode(file.content)).join("\n");
-    expect(all).toContain("Capability status: pre-release method resource");
-    expect(all).toContain("not implemented or accepted");
+    expect(all).toContain("ensemble_work");
+    expect(all).toContain("ensemble_learn");
+    expect(all).toContain("ensemble_upload");
+    expect(all).toContain("operation_id");
+    expect(all).not.toContain("not implemented or accepted");
     expect(all).not.toMatch(/\bOMP\b/);
     expect(all).not.toContain("ensemble_state");
     expect(all).not.toContain(".ensemble/");

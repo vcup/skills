@@ -1,5 +1,5 @@
 /**
- * The one place that decides which DSH releases this probe supports.
+ * The one place that decides which DSH releases this plugin supports.
  *
  * Every consumer reads this module: the package manifest (`engines.dsh`, peer
  * ranges), the Host type gate, the profile gate, the isolation gate, the
@@ -22,7 +22,7 @@
  */
 
 /**
- * DSH releases this probe was built and exercised against, oldest first.
+ * DSH releases this plugin was built and exercised against, oldest first.
  *
  * Adding a release is a deliberate act: run the full matrix against a real
  * install of it, then add it here. Never add a version merely because it is
@@ -37,7 +37,7 @@ export type SupportedDshVersion = (typeof SUPPORTED_DSH_VERSIONS)[number];
 export const DEFAULT_DSH_VERSION: SupportedDshVersion = "0.2.2-rc.5";
 
 /**
- * `engines.dsh` for the packaged probe, derived from the supported set.
+ * `engines.dsh` for the packaged plugin, derived from the supported set.
  *
  * DSH's compatibility gate lets an own `engines.dsh` decide alone (peers are
  * then ignored for that gate), and it accepts a semver disjunction of exact
@@ -88,6 +88,11 @@ export const DSH_HOST_IMPORT_PACKAGES = [
   "@deepseek-ai/dsh-subprocess-local",
   "@deepseek-ai/dsh-sandbox-local",
   "@deepseek-ai/dsh-typert-protocol",
+  "@deepseek-ai/dsh-fs-local",
+  "@deepseek-ai/dsh-session",
+  "@deepseek-ai/dsh-api-remote-access",
+  "@deepseek-ai/dsh-scope",
+  "@deepseek-ai/dsh-subagent",
 ] as const;
 
 /** Every package whose version must agree with the running DSH release. */
@@ -212,7 +217,7 @@ export function judgeProbeShadow(
     const provided = hostVersions.get(reading.package);
     if (provided === reading.version) continue;
     problems.push(
-      `dsh-ensemble-probe has a private ${reading.package}@${reading.version} copy while the install ` +
+      `dsh-ensemble has a private ${reading.package}@${reading.version} copy while the install ` +
         `provides ${provided === undefined ? "no copy" : `${reading.package}@${provided}`}; ` +
         "the plugin would load a different DSH release than the host",
     );

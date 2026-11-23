@@ -65,6 +65,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The reviewed entry point of the bundle. */
 export const BUNDLE_ENTRY = "adapters/dsh/lib/transport.mjs";
+export const BUNDLE_GENERATOR = "scripts/build-dsh-bundle.ts";
 
 /** Where the generated bundle and its provenance live. */
 export const BUNDLE_OUTPUT = "adapters/dsh/lib/transport.bundle.mjs";
@@ -130,6 +131,9 @@ function sha256(text: string): string {
 /** What the provenance file records about one build. */
 export interface BundleProvenance {
   readonly entry: string;
+  readonly entrySha256: string;
+  readonly generatorSha256: string;
+  readonly bunVersion: string;
   readonly bytes: number;
   readonly sha256: string;
   /** Every package that contributed code, with the version and file resolved. */
@@ -258,8 +262,11 @@ export async function buildBundle(options: { readonly install: string }): Promis
     .sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0));
 
   const provenance: BundleProvenance = {
-    format: "dsh-cli-bundle/v1",
+    format: "dsh-cli-bundle/v2",
     entry: BUNDLE_ENTRY,
+    entrySha256: sha256(readFileSync(join(REPO_ROOT, BUNDLE_ENTRY), "utf8")),
+    generatorSha256: sha256(readFileSync(join(REPO_ROOT, BUNDLE_GENERATOR), "utf8")),
+    bunVersion: Bun.version,
     bytes: Buffer.byteLength(code, "utf8"),
     sha256: sha256(code),
     inputs,
@@ -310,12 +317,16 @@ export function normaliseSourceComments(code: string, install: string): string {
  * @param provenance - what the build resolved.
  */
 export function assertBundleClosure(code: string, provenance: BundleProvenance): void {
-  const bare = provenance.externals.filter((specifier) => !specifier.startsWith("node:"));
+  const actual = [...new Set(new Bun.Transpiler({ loader: "js" }).scanImports(code).map((item) => item.path))].sort();
+  const bare = [...new Set([...provenance.externals, ...actual])].filter((specifier) => !specifier.startsWith("node:"));
   if (bare.length > 0) {
     fail(
       `the CLI bundle still needs ${bare.join(", ")} at run time; the package must import nothing bare ` +
         "but Node builtins, or it cannot run from an installed package outside a DSH profile",
     );
+  }
+  if (JSON.stringify(actual) !== JSON.stringify([...provenance.externals].sort())) {
+    fail("the CLI bundle imports do not match its recorded externals");
   }
   const packages = provenance.inputs.map((input) => input.package);
   const forbidden = packages.filter((name) => (FORBIDDEN_IN_BUNDLE as readonly string[]).includes(name));
@@ -331,6 +342,9 @@ export function assertBundleClosure(code: string, provenance: BundleProvenance):
       `the CLI bundle resolved ${unexpected.join(", ")}, which is not part of the declared transport closure; ` +
         "review the entry point before adding it",
     );
+  }
+  for (const name of BUNDLE_PACKAGES) {
+    if (!packages.includes(name)) fail(`the CLI bundle is missing the recorded input ${name}`);
   }
   if (!code.includes("installConnection")) {
     fail("the CLI bundle does not contain the client transport it exists to provide");
@@ -420,8 +434,26 @@ export function readCommittedBundle(options: { readonly root?: string } = {}): {
   }
   const code = readFileSync(codePath, "utf8");
   const provenance = JSON.parse(readFileSync(provenancePath, "utf8")) as BundleProvenance;
+  if (!provenance || provenance.format !== "dsh-cli-bundle/v2" || provenance.entry !== BUNDLE_ENTRY ||
+      typeof provenance.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(provenance.sha256) ||
+      !Number.isSafeInteger(provenance.bytes) || provenance.bytes < 0 ||
+      !Array.isArray(provenance.inputs) || !provenance.inputs.every((input) => input &&
+        typeof input.package === "string" && typeof input.version === "string" &&
+        typeof input.path === "string" && typeof input.sha256 === "string" && /^[a-f0-9]{64}$/.test(input.sha256)) ||
+      !Array.isArray(provenance.externals) || !provenance.externals.every((item) => typeof item === "string")) {
+    fail("the CLI bundle provenance is malformed or unsupported; regenerate with make dsh-bundle");
+  }
+  for (const [path, expected, label] of [
+    [BUNDLE_ENTRY, provenance.entrySha256, "reviewed transport source"],
+    [BUNDLE_GENERATOR, provenance.generatorSha256, "generator"],
+  ] as const) {
+    if (!existsSync(join(root, path)) || sha256(readFileSync(join(root, path), "utf8")) !== expected) {
+      fail(`the CLI bundle ${label} changed; regenerate with make dsh-bundle`);
+    }
+  }
+  if (code.indexOf("\n\n") < 0) fail("the CLI bundle generated header is missing");
   const body = code.slice(code.indexOf("\n\n") + 2);
-  if (sha256(body) !== provenance.sha256) {
+  if (sha256(body) !== provenance.sha256 || Buffer.byteLength(body, "utf8") !== provenance.bytes) {
     fail(
       `${BUNDLE_OUTPUT} does not match the digest in ${BUNDLE_PROVENANCE}: ` +
         `the file was edited by hand or half-written. Regenerate it with \`make dsh-bundle\`.`,

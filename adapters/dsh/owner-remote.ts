@@ -32,6 +32,8 @@ import type { Context } from "@deepseek-ai/cordis";
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import { ownerRefusal, type InvocationLike, type OwnerRefusal } from "./owner.ts";
 import type { OwnerService, Outcome } from "./owner-service.ts";
+import type { ProductOwner } from "./native/owner.ts";
+import { failure } from "../../modules/ensemble/contracts.ts";
 
 /** Cordis service key and Typert namespace of the owner Remote. */
 export const OWNER_SERVICE_KEY = "ensembleArchive";
@@ -73,6 +75,28 @@ export function refusalFor(invocation: InvocationLike | undefined): OwnerRefusal
 }
 
 /**
+ * The refusal for a retired v1 method.
+ *
+ * The code is `unsupported_version` rather than `invalid_input` on purpose: the
+ * call is well-formed, the *interface* is gone. The message names the exact
+ * replacement so an operator can fix a script without reading the source, and it
+ * never suggests that a retry with a different payload might work.
+ * @param method - the retired wire method that was called.
+ * @returns a structured refusal in the same `Result` shape every method returns.
+ */
+export function legacyRetired(method: "initialize" | "bind" | "status" | "readBack") {
+  const replacement =
+    method === "status" || method === "readBack"
+      ? "Use `query` (kind `context` or `object`) for archive state and stored bytes; those read the v2 registry this Host actually writes."
+      : `Use \`manage\` with action \`${method === "bind" ? "bind" : "initialize"}\`; the v1 ${method} entry is retired in 1.0 and cannot create or extend an archive.`;
+  return failure(
+    "unsupported_version",
+    `ensembleArchive.${method} is retired in 1.0: it wrote a v1 archive that this version no longer creates. ${replacement} ` +
+      "An existing 0.3.0 archive is migrated only by an explicit owner flow: read its handle, preview, back it up, stop the old writer, then initialize a new archive identity with fresh grants. The old repository, its head and its history are never written by this package.",
+  );
+}
+
+/**
  * The owner management Remote service.
  *
  * Constructing it registers it under {@link OWNER_SERVICE_KEY}, which also binds
@@ -89,62 +113,144 @@ export class ArchiveOwnerRemote extends TypertRemoteService {
    * real cause.
    */
   readonly archiveService: OwnerService;
+  productService: ProductOwner | undefined;
+  /**
+   * Optional read-only view of a pre-1.0 archive.
+   *
+   * Only `status` and `readBack` consult it, and only for reading. Nothing here
+   * can create, bind, extend or migrate a v1 archive: that path is retired in
+   * 1.0 so one root cannot end up with two writers.
+   */
+  legacyReader: OwnerService | undefined;
 
-  constructor(ctx: Context, service: OwnerService, serviceKey: string = OWNER_SERVICE_KEY) {
+  constructor(ctx: Context, service: OwnerService, serviceKey: string = OWNER_SERVICE_KEY, product?: ProductOwner, legacyReader?: OwnerService) {
     super(ctx, serviceKey);
     this.archiveService = service;
+    this.productService = product;
+    this.legacyReader = legacyReader;
   }
 
   /**
-   * Create the archive and its initial binding/grant version.
+   * Retired archive-creation entry.
    *
-   * The only call that may use `expected_revision: absent`, because it is the
-   * owner creating the archive for the first time.
-   * @param request - root handle, source descriptor, initial grants, limits.
-   * @returns the archive id and committed revision, or a refusal.
+   * Version 1.0 has exactly one archive writer: the `manage` executor over the
+   * v2 registry. The older four-method surface wrote a *different* store from
+   * the same root, so leaving it callable would have meant two writers and two
+   * repositories behind one environment variable. It is therefore retired for
+   * creation rather than silently adapted: an old payload shape must not become
+   * a new archive.
+   *
+   * The method stays on the wire so an existing script gets a precise,
+   * actionable refusal instead of "unknown method", and it remains behind the
+   * same owner guard, so an unauthenticated caller learns nothing new.
+   * @param request - ignored; the payload shape is no longer accepted. The name
+   *   matters: the gateway derives wire argument names from the signature, so
+   *   this must stay `request` even though it is unused.
+   * @returns a refusal naming the replacement action.
    */
   @Remote
   async initialize(request: Record<string, unknown>): Promise<unknown> {
+    void request;
     const refusal = refusalFor(this.ctx.invocation);
     if (refusal !== undefined) return refusal;
-    return this.archiveService.initialize(request, this.ctx.invocation);
+    return legacyRetired("initialize");
   }
 
   /**
-   * Record a new source binding on an existing archive.
-   * @param request - source descriptor, mapping evidence, reason, expected revision.
-   * @returns the new binding version, or a refusal.
+   * Retired source-binding entry.
+   *
+   * Binding is now `manage` with `action: "bind"` (or `"rebind"`), which records
+   * the same intent in the v2 transaction with a receipt. The v1 binding wrote a
+   * separate store and is retired for the same reason as `initialize`.
+   * @param request - ignored; the name must stay `request` for the gateway.
+   * @returns a refusal naming the replacement action.
    */
   @Remote
   async bind(request: Record<string, unknown>): Promise<unknown> {
+    void request;
     const refusal = refusalFor(this.ctx.invocation);
     if (refusal !== undefined) return refusal;
-    return this.archiveService.bind(request, this.ctx.invocation);
+    return legacyRetired("bind");
   }
 
   /**
-   * Report the archive's current head, sequence and binding.
+   * Read-only legacy diagnostics, or a refusal when no legacy archive is mounted.
+   *
+   * This is deliberately read-only: it never opens a writer, so asking a 1.0
+   * Host about an old archive cannot create or extend one.
    * @param request - empty; retained so every method takes one shape.
-   * @returns the status, or a refusal.
+   * @returns status, or a refusal naming the replacement query.
    */
   @Remote
   async status(request: Record<string, unknown>): Promise<unknown> {
     const refusal = refusalFor(this.ctx.invocation);
     if (refusal !== undefined) return refusal;
-    return this.archiveService.status(request, this.ctx.invocation);
+    if (this.legacyReader === undefined) return legacyRetired("status");
+    return this.legacyReader.status(request, this.ctx.invocation);
   }
 
   /**
-   * Read one file at a concrete revision.
+   * Read-only legacy read-back, or a refusal when no legacy archive is mounted.
    * @param request - revision and path.
-   * @returns the content and byte count, or a refusal.
+   * @returns content and byte count, or a refusal.
    */
   @Remote
   async readBack(request: Record<string, unknown>): Promise<unknown> {
     const refusal = refusalFor(this.ctx.invocation);
     if (refusal !== undefined) return refusal;
-    return this.archiveService.readBack(request, this.ctx.invocation);
+    if (this.legacyReader === undefined) return legacyRetired("readBack");
+    return this.legacyReader.readBack(request, this.ctx.invocation);
   }
+
+  @Remote
+  async projects(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.projects(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async query(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.query(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async manage(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.manage(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async destinations(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.destinations(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async choose(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.choose(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async environment(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.environment(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote
+  async approve(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) return refusal;
+    return this.productService?.approve(request, this.ctx.invocation, signal) ?? failure("storage_unavailable", "project registry is not configured");
+  }
+
+  @Remote({ mode: "stream" })
+  async *watch(request: Record<string, unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
+    const refusal = refusalFor(this.ctx.invocation); if (refusal) { yield refusal; return; }
+    if (!this.productService) { yield failure("storage_unavailable", "project registry is not configured"); return; }
+    yield* this.productService.watch(request, this.ctx.invocation, signal);
+  }
+
 }
 
 /**
@@ -158,8 +264,10 @@ export function createOwnerRemote(
   ctx: Context,
   service: OwnerService,
   serviceKey: string = OWNER_SERVICE_KEY,
+  product?: ProductOwner,
+  legacyReader?: OwnerService,
 ): ArchiveOwnerRemote {
-  return new ArchiveOwnerRemote(ctx, service, serviceKey);
+  return new ArchiveOwnerRemote(ctx, service, serviceKey, product, legacyReader);
 }
 
 /** Re-exported so a caller can type a result without importing the logic module. */

@@ -1,51 +1,72 @@
-name: Ensemble content
+name: Repository quality
 
-# Regenerates the committed pure-skill artifact from `content/ensemble/` and fails
-# when the committed directory differs from what the maintained source produces.
-# This catches the case where a source edit lands without its generated output.
+# Every step runs the same Make entry points a maintainer runs locally, so a green
+# workflow and a green local run mean the same thing. Nothing here publishes a
+# package, touches a live profile, or uses a paid model credential.
 #
-# The workflow drives the repository `Makefile`, the same interface maintainers
-# use locally; package.json has no `scripts` block and nothing here calls
-# `npm run` or `bun run`.
+# Remote GitHub execution remains distinct evidence from the equivalent local run:
+# a workflow file is not a passed run, and this file says nothing about whether the
+# workflows have ever executed here.
 #
-# Local status: this workflow has NOT been executed on GitHub from this
-# repository. The same commands were run locally and reported the committed
-# artifact as up to date. Treat remote execution as unverified.
+# Three jobs, in dependency order:
 #
-# Scope: content consistency and the builder tests only. This does not install
-# the skill, build the OMP or DSH packages, or exercise any runtime.
+#   offline   the offline door, plus the release matrix derived from the maintained
+#             support declarations, plus the artifact the strict legs must verify.
+#   native    one leg per tested release. Each leg installs *that* release and runs
+#             the whole gate set against the *same* pinned artifact bytes: both type
+#             programs, the Loader, the installed product, the live maintenance run,
+#             the non-author acceptance suites and the authenticated browser UI.
+#             The source-world fixture runs as a container on the same runner, so
+#             the cross-container gate is real without reaching across runners.
+#   release   the summary of what the native legs proved. It asserts nothing itself;
+#             it exists so a human reads one green check instead of four.
+#
+# The artifact is pinned by bytes. A leg that packs its own tarball would be
+# verifying different input under the same name — the exact substitution the strict
+# door exists to prevent — so packing happens once, in `offline`, and every later
+# step receives `PACKAGE` and `PACKAGE_SHA256`.
+#
+# Every prerequisite is named. A machine without a browser, without a container
+# runtime, or without an isolated install exits non-zero instead of skipping, and no
+# job has a conditional that could turn a gate into a no-op.
 
 on:
   push:
-    paths:
-      - "content/ensemble/**"
-      - "skills/ensemble/**"
-      - "scripts/build-ensemble.ts"
-      - "scripts/build-ensemble.test.ts"
-      - "scripts/project-tasks.ts"
-      - "scripts/makefile.test.ts"
-      - "Makefile"
-      - "package.json"
-      - ".github/workflows/ensemble-content.yml"
   pull_request:
-    paths:
-      - "content/ensemble/**"
-      - "skills/ensemble/**"
-      - "scripts/build-ensemble.ts"
-      - "scripts/build-ensemble.test.ts"
-      - "scripts/project-tasks.ts"
-      - "scripts/makefile.test.ts"
-      - "Makefile"
-      - "package.json"
-      - ".github/workflows/ensemble-content.yml"
+  workflow_dispatch:
+    inputs:
+      package-sha256:
+        description: Optional sha256 of an existing candidate to re-verify (must match the packed one)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # One Bun and one Node for every job; the legs differ only in which DSH release
+  # they install.
+  BUN_VERSION: 1.4.5
+  NODE_VERSION: '26'
+  # The container image the source-world fixture runs in. It needs a real Node and
+  # nothing else: the fixture serves its own bytes from a fresh temporary root.
+  SOURCE_IMAGE: node:26-bookworm-slim
+  # Chrome-for-testing in the image, so the browser gate has a named, reproducible
+  # build instead of whatever a runner image happens to carry.
+  CHROME_VERSION: 158.0.8127.36
+
 jobs:
-  content:
-    name: Generated skill matches source
+  offline:
+    name: Offline gates, types, packages and the matrix
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      package: ${{ steps.candidate.outputs.package }}
+      sha256: ${{ steps.candidate.outputs.sha256 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -53,15 +74,234 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Install locked dependencies and run the offline gate
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install the locked development dependencies
         run: make setup
 
-      - name: Check generated pure-skill artifact
-        run: make content TARGET=skill
+      # The offline door includes the type-coverage gate, which reads the real
+      # `tsc --listFiles` closures of both plain programs and fails when a
+      # maintained file is in no program.
+      - name: Offline door (content, both plain type programs, coverage, bundle, docs, tests, packages)
+        run: make package-check
 
-      # `make setup` above already ran `check` (install -> doctor -> check), so it
-      # is not repeated here; the suite is the additional step.
-      - name: Run the test suite
-        run: make test
+      - name: Packaged manifests declare exactly the tested releases
+        run: make matrix-check
+
+      - name: Derive the release matrix from the maintained support declarations
+        id: matrix
+        shell: bash
+        run: |
+          matrix=$(bun -e 'import {SUPPORTED_DSH_VERSIONS as ensemble} from "./adapters/dsh/compatibility.ts"; import {SUPPORTED_DSH_VERSIONS as wait} from "./adapters/dsh-agent-wait/meta.ts"; const versions=[...new Set([...ensemble,...wait])].sort(); if (versions.join()!==[...ensemble].sort().join()||versions.join()!==[...wait].sort().join()) throw new Error("the two plugins disagree about the tested releases"); console.log(JSON.stringify({include:versions.map(version=>({version,slug:version.replace(/[.]/g,"-")}))}))')
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+      # The candidate is chosen once and pinned by bytes here. Later jobs install
+      # exactly this file; if a later step ever packed again, the hash comparison in
+      # `make require-package` would fail rather than silently verify other bytes.
+      - name: Pin the candidate artifact by sha256
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          package=$(ls build/pack/candidates/dsh-ensemble-*.tgz 2>/dev/null | head -1 || true)
+          if [ -z "$package" ]; then package=$(ls build/pack/dsh/dsh-ensemble-*.tgz | head -1); fi
+          sha256=$(sha256sum "$package" | cut -d' ' -f1)
+          printf 'package=%s\n' "$package" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$sha256" >> "$GITHUB_OUTPUT"
+          printf 'pinned candidate: %s sha256 %s\n' "$package" "$sha256"
+
+      - name: Refuse a caller-supplied hash that does not match the packed bytes
+        if: inputs.package-sha256 != ''
+        shell: bash
+        env:
+          REQUESTED: ${{ inputs.package-sha256 }}
+          ACTUAL: ${{ steps.candidate.outputs.sha256 }}
+        run: |
+          if [ "$REQUESTED" != "$ACTUAL" ]; then
+            echo "requested $REQUESTED but the tree packed $ACTUAL" >&2
+            exit 2
+          fi
+
+      - name: Retain the pinned candidate and the local package set
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-candidates
+          path: |
+            build/pack/dsh/*.tgz
+            build/pack/dsh-agent-wait/*.tgz
+            build/pack/candidates/*.tgz
+          if-no-files-found: error
+
+  native:
+    name: Every gate on DSH ${{ matrix.version }}
+    needs: offline
+    runs-on: ubuntu-latest
+    # A native leg installs a real release, boots real Hosts and launches a real
+    # browser. It is slower than the offline job by an order of magnitude and must
+    # not be silently cut short: a timeout here would read as a scheduling problem
+    # rather than as missing verification.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.offline.outputs.matrix) }}
+    env:
+      PACKAGE: ${{ needs.offline.outputs.package }}
+      PACKAGE_SHA256: ${{ needs.offline.outputs.sha256 }}
+      INSTALL_DIR: ${{ github.workspace }}/.ci/dsh-install
+      CLIENT_TYPES: ${{ github.workspace }}/.ci/client-types
+      # The browser needs a writable HOME and XDG tree, and a font configuration.
+      # Without a font it aborts before loading the page — an environment failure,
+      # not a product one — so both are provisioned here by name.
+      CHROME_HOME: ${{ github.workspace }}/.ci/chrome-home
+      FONTCONFIG_FILE: ${{ github.workspace }}/.ci/fonts/fonts.conf
+      ENSEMBLE_BROWSER_FONTCONFIG: ${{ github.workspace }}/.ci/fonts/fonts.conf
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The browser, its shared libraries and its fonts. `fonts-dejavu-core` is the
+      # smallest set Chrome will actually render with; without it the browser exits
+      # on a crashpad abort that reads like a product failure.
+      - name: Install browser runtime, fonts and container runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            fonts-dejavu-core fontconfig libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libgbm1 libgtk-3-0 libasound2 unzip
+          mkdir -p "$CHROME_HOME" "$(dirname "$FONTCONFIG_FILE")"
+          printf '%s\n' '<?xml version="1.0"?>' \
+            '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">' \
+            '<fontconfig><dir>/usr/share/fonts</dir><cachedir>/var/cache/fontconfig</cachedir></fontconfig>' \
+            > "$FONTCONFIG_FILE"
+          curl -sSL -o chrome.zip \
+            "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip"
+          mkdir -p .ci/chrome
+          unzip -q chrome.zip -d .ci/chrome
+          .ci/chrome/chrome-linux64/chrome --version
+
+      - name: Install the locked development dependencies
+        run: make setup
+
+      # The candidate is *retrieved*, not rebuilt: the offline job's bytes are the
+      # input to every leg.
+      - name: Retrieve the pinned candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: package-candidates
+
+      - name: Prove the retrieved candidate is the pinned byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(sha256sum "$PACKAGE" | cut -d' ' -f1)
+          if [ "$actual" != "$PACKAGE_SHA256" ]; then
+            echo "retrieved $actual, expected $PACKAGE_SHA256" >&2
+            exit 2
+          fi
+          printf 'pinned candidate: %s\nsha256: %s\n' "$PACKAGE" "$PACKAGE_SHA256"
+
+      - name: Prepare an isolated install of this release
+        env:
+          DSH_VERSION: ${{ matrix.version }}
+        run: make runtime-setup INSTALL_DIR="$INSTALL_DIR" DSH_VERSION="$DSH_VERSION"
+
+      - name: Client type environment at exactly this release
+        run: make client-types INSTALL_DIR="$INSTALL_DIR" CLIENT_TYPES="$CLIENT_TYPES"
+
+      # Both runtime type programs and the closure check: no maintained file may be
+      # in no program. This is the F1 gate, and it refuses a package whose types
+      # were never compiled.
+      - name: Complete type coverage (plain + Host + Client programs)
+        run: make typecheck-strict INSTALL_DIR="$INSTALL_DIR" CLIENT_TYPES="$CLIENT_TYPES"
+
+      - name: Ensemble Host types and the real Loader
+        run: make host-check INSTALL_DIR="$INSTALL_DIR"
+
+      - name: Wait plugin Host types and the real Loader
+        run: make wait-host-check INSTALL_DIR="$INSTALL_DIR"
+
+      - name: Wait plugin native lifecycle
+        run: make wait-runtime-check INSTALL_DIR="$INSTALL_DIR"
+
+      # The live gate, not the engine regression: it drives the installed product
+      # through the packaged CLI against a real Host, on this leg's release.
+      - name: Live archive maintenance on the installed product
+        run: make maintenance-live-check INSTALL_DIR="$INSTALL_DIR" PACKAGE="$PACKAGE" PACKAGE_SHA256="$PACKAGE_SHA256"
+
+      - name: Installed product, environment and ledger gates
+        run: make production-check INSTALL_DIR="$INSTALL_DIR" PACKAGE="$PACKAGE" PACKAGE_SHA256="$PACKAGE_SHA256"
+
+      - name: Independent replica acceptance (nine typed cases)
+        run: make replica-acceptance-check RUNTIME="$INSTALL_DIR"
+
+      # The source world runs on this runner, in its own container, with the fixture
+      # script mounted read-only and a tmpfs for state. The project is deliberately
+      # not mounted: the gate exists to prove the bytes do not come from this
+      # filesystem.
+      - name: Cross-container source world
+        run: make source-acceptance-sidecar-check RUNTIME="$INSTALL_DIR"
+
+      # The real UI gate: the shipped Client in a real browser against a live Host
+      # this step boots. A component fixture is not a substitute, so this step is
+      # unconditional.
+      - name: Authenticated browser UI on the shipped Client
+        run: |
+          make auth-ui-check \
+            INSTALL_DIR="$INSTALL_DIR" \
+            PACKAGE="$PACKAGE" \
+            PACKAGE_SHA256="$PACKAGE_SHA256" \
+            BROWSER="$GITHUB_WORKSPACE/.ci/chrome/chrome-linux64/chrome" \
+            HOME="$CHROME_HOME" \
+            XDG_CONFIG_HOME="$CHROME_HOME/.config" \
+            XDG_CACHE_HOME="$CHROME_HOME/.cache"
+
+      - name: Retain the evidence this leg produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-evidence-${{ matrix.slug }}
+          path: |
+            build/production
+            .ci/client-types
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Strict release conclusion
+    needs: [offline, native]
+    runs-on: ubuntu-latest
+    steps:
+      # This job asserts nothing new. It exists so the workflow has one green check
+      # whose name means "every gate ran on every tested release against one pinned
+      # artifact", and so a partially-green matrix cannot read as a release.
+      - name: Confirm every leg ran and every artifact was retained
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-evidence-*
+          path: build/evidence
+      - name: Report the pinned artifact
+        shell: bash
+        env:
+          SHA256: ${{ needs.offline.outputs.sha256 }}
+          PACKAGE: ${{ needs.offline.outputs.package }}
+        run: |
+          printf 'pinned candidate: %s\nsha256: %s\n' "$PACKAGE" "$SHA256" >> "$GITHUB_STEP_SUMMARY"
+          printf 'legs: %s\n' '${{ needs.offline.outputs.matrix }}' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Nothing was published, committed, or installed into a live profile.\n' >> "$GITHUB_STEP_SUMMARY"

@@ -22,10 +22,11 @@
  * a shell without `node` on `PATH` fails even when the path is right.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { PACKAGE_NAME, PACKAGE_VERSION, STAGING_DIR } from "./meta.ts";
 
 const roots: string[] = [];
 
@@ -40,7 +41,38 @@ afterAll(() => {
 });
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
-const TARBALL = join(REPO_ROOT, "build", "pack", "dsh", "dsh-ensemble-probe-0.3.0.tgz");
+/**
+ * The tarball under test: pinned, or packed by this file into its own staging
+ * directory.
+ *
+ * Every test file that needs an artifact packs its own, into a private
+ * directory. Sharing `build/pack/dsh` looked simpler but was wrong: `pack()`
+ * clears its staging target before writing, so two files running concurrently
+ * deleted each other's tarball and produced failures with nothing to do with the
+ * CLI. A private directory keeps the assertion identical — it is still the real
+ * `pack()` output — and removes the race.
+ */
+const PINNED_TARBALL = process.env.DSH_CLI_TEST_TARBALL;
+const PRIVATE_STAGING = join(tmpdir(), `cli-invocation-pack-${process.pid}-${Date.now()}`);
+const TARBALL = PINNED_TARBALL === undefined || PINNED_TARBALL.trim() === ""
+  ? join(PRIVATE_STAGING, `${PACKAGE_NAME}-${PACKAGE_VERSION}.tgz`)
+  : resolve(PINNED_TARBALL);
+
+let packedOnce: Promise<void> | undefined;
+/**
+ * Ensure the artifact exists before any case installs it.
+ *
+ * Idempotent: every case calls it, and packing repeatedly would let a later call
+ * overwrite a tarball an earlier assertion is still reading.
+ */
+function ensureTarball(): Promise<void> {
+  if (PINNED_TARBALL !== undefined && PINNED_TARBALL.trim() !== "") return Promise.resolve();
+  return (packedOnce ??= (async () => {
+    const { pack } = (await import("../../scripts/pack-dsh.ts")) as typeof import("../../scripts/pack-dsh.ts");
+    const result = await pack({ root: REPO_ROOT, stagingDir: PRIVATE_STAGING });
+    expect(result.tarball).toBe(TARBALL);
+  })());
+}
 const PACKAGE_README = join(REPO_ROOT, "adapters", "dsh", "package-readme.md");
 
 /** A PATH with no profile `.bin` on it, and `node` available. */
@@ -66,7 +98,8 @@ const INSTALL = resolveInstall();
 const SKIP = INSTALL === undefined || INSTALL === "";
 
 /** Install into a fresh profile and return the paths the README refers to. */
-function freshInstall(): { profileBin: string; script: string; home: string } {
+async function freshInstall(): Promise<{ profileBin: string; script: string; home: string }> {
+  await ensureTarball();
   const root = temporaryRoot();
   const home = join(root, "home");
   const env = {
@@ -86,7 +119,7 @@ function freshInstall(): { profileBin: string; script: string; home: string } {
   return {
     home,
     profileBin: join(profile, "node_modules", ".bin", "ensemble-archive"),
-    script: join(profile, "node_modules", "dsh-ensemble-probe", "bin", "ensemble-archive.js"),
+    script: join(profile, "node_modules", PACKAGE_NAME, "bin", "ensemble-archive.js"),
   };
 }
 
@@ -101,10 +134,11 @@ function sh(command: string, env: Record<string, string>) {
 }
 
 describe("the documented invocation form", () => {
+  beforeAll(async () => { await ensureTarball(); }, 300_000);
   test.skipIf(SKIP)(
     "a bare `ensemble-archive` is not on PATH, which is why the README names one",
-    () => {
-      const { profileBin } = freshInstall();
+    async () => {
+      const { profileBin } = await freshInstall();
       expect(existsSync(profileBin)).toBe(true);
       const result = sh("ensemble-archive status", { PATH: plainPath() });
       expect(result.code).toBe(127);
@@ -115,8 +149,8 @@ describe("the documented invocation form", () => {
 
   test.skipIf(SKIP)(
     "the profile-.bin path the README gives resolves and runs",
-    () => {
-      const { profileBin } = freshInstall();
+    async () => {
+      const { profileBin } = await freshInstall();
       const result = sh(`"${profileBin}" status`, { PATH: plainPath() });
       // 3 = loaded, parsed, and refused for want of a credential. A 127 here
       // would mean the documented path is wrong.
@@ -128,8 +162,8 @@ describe("the documented invocation form", () => {
 
   test.skipIf(SKIP)(
     "prepending the profile .bin to PATH also works, as the README's alternative says",
-    () => {
-      const { profileBin } = freshInstall();
+    async () => {
+      const { profileBin } = await freshInstall();
       const binDir = resolve(profileBin, "..");
       const result = sh("ensemble-archive status", { PATH: `${binDir}:${plainPath()}` });
       expect(result.code, result.stderr).toBe(3);
@@ -140,8 +174,8 @@ describe("the documented invocation form", () => {
 
   test.skipIf(SKIP)(
     "the shebang needs node on PATH, and says so rather than failing obscurely",
-    () => {
-      const { script } = freshInstall();
+    async () => {
+      const { script } = await freshInstall();
       // A PATH with the script but genuinely no `node` on it: /usr/bin contains
       // one, so an empty temporary directory is the only honest way to say it.
       const emptyBin = temporaryRoot("no-node-path-");

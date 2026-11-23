@@ -1,9 +1,7 @@
 # Ensemble Invocation State
 
-> **Capability status: pre-release method resource.** The managed owner that stores, generates, and versions this checkpoint is not implemented or accepted for this path.
+The checkpoint is a generated recovery view of accepted archive records. Read it with `ensemble_read` using the invocation identity; use `ensemble_work` and `ensemble_learn` to change the underlying facts and judgments. Never hand-edit the projection.
 
-`STATE.md` is a compact recovery view, not a work ledger or technical dossier. Keep technical truth in the subject and evidence; keep frequent history in a separate repository rather than the product commit stream.
+A checkpoint summarizes the current goal, coverage, candidate, decisions, evidence gaps and next action. It does not replace complete technical artifacts or prove that native work succeeded. Follow exact record references when checking a decision, and continue paginated results until the requested material is complete.
 
-**How to read this file.** The field list below describes what a checkpoint contains and what a tool reads back. It is not a procedure for creating one by hand, and it does not establish that any storage exists. Where the path generates the document, it is read-only output: the model supplies claims, evidence, and decisions and never hand-edits a generated document.
-
-**When the owner is unavailable.** Report the missing capability to the Lead as a gap. Do not adopt another path's storage layout or tool, and do not claim a managed archive, a receipt, or a history commit.
+If the archive or current grant is unavailable, report the gap. Do not create a replacement workspace layout or claim an unconfirmed receipt. After interruption, reconcile outstanding receipts and native actions before resuming dependent work.

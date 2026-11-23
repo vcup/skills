@@ -36,6 +36,7 @@
  * @module scripts/verify-dsh-cli
  */
 
+import { PACKAGE_NAME, PACKAGE_VERSION } from "../adapters/dsh/meta.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -61,7 +62,7 @@ export interface VerifyVerdict {
 }
 
 /** The tarball the verification installs. */
-export const PROBE_TARBALL = "build/pack/dsh/dsh-ensemble-probe-0.3.0.tgz";
+export const PROBE_TARBALL = `build/pack/dsh/${PACKAGE_NAME}-${PACKAGE_VERSION}.tgz`;
 
 /**
  * The packages that must not appear as private copies inside the installed
@@ -76,7 +77,11 @@ const SHARED_DSH_PACKAGES = ["dsh-skill", "dsh-tools", "dsh-subprocess-local", "
 
 /** Run one command, returning its exit code and streams. */
 function run(argv: readonly string[], options: { cwd: string; env: Record<string, string> }) {
-  const result = Bun.spawnSync(argv, {
+  // `readonly string[]` is the honest parameter type — this helper never mutates
+  // the caller's argv — but `Bun.spawnSync` requires a mutable array. Copy at the
+  // boundary rather than widening the parameter, so the read-only promise to
+  // callers survives and only this one adaptation pays for it.
+  const result = Bun.spawnSync([...argv], {
     cwd: options.cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -125,7 +130,7 @@ export function checkRelease(options: {
     problems.push(`dsh plugin add exited ${added.code}: ${added.stderr.trim() || added.stdout.trim()}`);
   }
   const profile = join(home, "profiles", "web");
-  const packageDir = join(profile, "node_modules", "dsh-ensemble-probe");
+  const packageDir = join(profile, "node_modules", "dsh-ensemble");
 
   // Registered as a bundle row, which is what makes the Host load it.
   let registered = false;
@@ -134,9 +139,9 @@ export function checkRelease(options: {
     const parsed = JSON.parse(readFileSync(profileManifest, "utf8")) as {
       dsh?: { profile?: { bundles?: string[] } };
     };
-    registered = (parsed.dsh?.profile?.bundles ?? []).includes("dsh-ensemble-probe");
+    registered = (parsed.dsh?.profile?.bundles ?? []).includes("dsh-ensemble");
   }
-  if (!registered) problems.push("the profile did not register dsh-ensemble-probe as a bundle row");
+  if (!registered) problems.push("the profile did not register dsh-ensemble as a bundle row");
 
   // No private copies of the shared DSH instances.
   let noPrivateCopies = true;

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +10,7 @@ import {
   cleanPlan,
   doctor,
   inspectArtifacts,
+  matrixCheck,
   stagingStatus,
   validateInstallDir,
   type Probe,
@@ -320,6 +322,125 @@ describe("cleanPlan", () => {
     expect(existsSync(join(root, "build"))).toBe(false);
     expect(existsSync(join(root, "keep.txt"))).toBe(true);
     expect(existsSync(join(root, "node_modules"))).toBe(true);
+
+    await rm(root, { recursive: true, force: true });
+  });
+});
+
+describe("matrixCheck", () => {
+  /**
+   * Write a real gzipped tarball containing `package/package.json`.
+   *
+   * `matrixCheck` reads the manifest with `tar -xzOf`, so a JSON file with a `.tgz` name is
+   * not a package — a fixture that did that would test the fixture instead of the gate.
+   */
+  async function fakePackage(path: string, manifest: unknown): Promise<void> {
+    await mkdir(join(path, ".."), { recursive: true });
+    const staging = await mkdtemp(join(tmpdir(), "fake-pkg-"));
+    await mkdir(join(staging, "package"), { recursive: true });
+    await writeFile(join(staging, "package/package.json"), JSON.stringify(manifest));
+    const built = spawnSync("tar", ["-czf", path, "-C", staging, "package"], { encoding: "utf8" });
+    await rm(staging, { recursive: true, force: true });
+    if (built.status !== 0) throw new Error(`tar failed: ${built.stderr ?? ""}`);
+  }
+
+  const goodEnsemble = {
+    name: "dsh-ensemble",
+    engines: { dsh: "0.2.2-rc.4 || 0.2.2-rc.5" },
+    ensemble: { supportedDsh: ["0.2.2-rc.4", "0.2.2-rc.5"] },
+  };
+  const goodWait = {
+    name: "dsh-agent-wait",
+    engines: { dsh: "0.2.2-rc.4 || 0.2.2-rc.5" },
+    wait: { supportedDsh: ["0.2.2-rc.4", "0.2.2-rc.5"] },
+  };
+
+  test("reads the named package rather than the default build output", async () => {
+    // The defect this pins: the gate used to glob `build/pack/dsh` and require exactly one
+    // tarball, so a re-packed default made it inspect a file the door had not pinned — and
+    // a legitimate pinned candidate was refused for a reason unrelated to its manifest.
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh/dsh-ensemble-1.0.0.tgz"), goodEnsemble);
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+    await fakePackage(join(root, "elsewhere/pinned.tgz"), goodEnsemble);
+
+    const report = matrixCheck(root, { ensemble: "elsewhere/pinned.tgz" });
+    expect(report.ok).toBe(true);
+    // It reports which artifact it inspected, so a reader can check the claim.
+    expect(report.readings.find((r) => r.package === "dsh-ensemble")?.tarball).toContain("elsewhere/pinned.tgz");
+    expect(report.lines.join("\n")).toContain("inspecting the named package");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a named package that does not exist is a failure, not a fallback", async () => {
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh/dsh-ensemble-1.0.0.tgz"), goodEnsemble);
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+
+    const report = matrixCheck(root, { ensemble: "missing/pinned.tgz" });
+    expect(report.ok).toBe(false);
+    expect(report.lines.join("\n")).toContain("does not exist");
+    // Crucially: it did not quietly inspect the default instead.
+    expect(report.readings.some((r) => r.package === "dsh-ensemble")).toBe(false);
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a named package with an unreadable manifest is refused", async () => {
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+    await mkdir(join(root, "bad"), { recursive: true });
+    await writeFile(join(root, "bad/pinned.tgz"), "not a tarball at all");
+
+    const report = matrixCheck(root, { ensemble: "bad/pinned.tgz" });
+    expect(report.ok).toBe(false);
+    expect(report.lines.join("\n")).toContain("no readable package/package.json");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a named package that omits a supported release still fails", async () => {
+    // Pinning must not weaken the manifest assertion: a package may not advertise less
+    // than the matrix exercised merely because it was named explicitly.
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+    await fakePackage(join(root, "pinned/one-release.tgz"), {
+      name: "dsh-ensemble",
+      engines: { dsh: "0.2.2-rc.4 || 0.2.2-rc.5" },
+      ensemble: { supportedDsh: ["0.2.2-rc.4"] },
+    });
+
+    const report = matrixCheck(root, { ensemble: "pinned/one-release.tgz" });
+    expect(report.ok).toBe(false);
+    expect(report.lines.join("\n")).toContain("dsh-ensemble");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("without a named package it still discovers the build output", async () => {
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh/dsh-ensemble-1.0.0.tgz"), goodEnsemble);
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+
+    const report = matrixCheck(root);
+    expect(report.ok).toBe(true);
+    expect(report.readings.find((r) => r.package === "dsh-ensemble")?.tarball).toContain("build/pack/dsh");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("two tarballs in the default directory is ambiguous, not a pick", async () => {
+    // A silent "first match" is how a stale tarball would be inspected while the
+    // maintainer believed the fresh one was.
+    const root = await temporaryRoot();
+    await fakePackage(join(root, "build/pack/dsh/dsh-ensemble-1.0.0.tgz"), goodEnsemble);
+    await fakePackage(join(root, "build/pack/dsh/dsh-ensemble-1.0.1.tgz"), goodEnsemble);
+    await fakePackage(join(root, "build/pack/dsh-agent-wait/dsh-agent-wait-1.0.0.tgz"), goodWait);
+
+    const report = matrixCheck(root);
+    expect(report.ok).toBe(false);
+    expect(report.lines.join("\n")).toContain("expected exactly one built tarball");
 
     await rm(root, { recursive: true, force: true });
   });

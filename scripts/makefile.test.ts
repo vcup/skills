@@ -24,10 +24,18 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PROBE_VERSION } from "../adapters/dsh/meta.ts";
+import { PACKAGE_VERSION } from "../adapters/dsh/meta.ts";
 import { DEFAULT_DSH_VERSION, SUPPORTED_DSH_VERSIONS } from "../adapters/dsh/compatibility.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * The make subprocess has a 120-second timeout. These two isolation cases allow
+ * another 30 seconds for assertions and cleanup, so the subprocess timeout can
+ * report an error before Bun terminates the test.
+ */
+const CHILD_TIMEOUT_MS = 120_000;
+const TEST_SLACK_MS = 30_000;
 
 /**
  * The fixture is the repository itself minus the ignored trees: the Makefile's
@@ -81,10 +89,22 @@ async function make(
     cwd: options.cwd ?? fixture,
     encoding: "utf8",
     env: { ...cleanEnv(), ...options.env },
-    timeout: 120_000,
+    timeout: CHILD_TIMEOUT_MS,
   });
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
+  // A timeout is diagnosed, not swallowed into `code: -1`. `spawnSync` reports it as
+  // `error.code === "ETIMEDOUT"` with `status: null`, `signal: "SIGTERM"` and empty
+  // output; without this the caller only sees `code: -1` and an assertion that reads
+  // captured output fails with an empty string instead of naming the real cause.
+  const error = result.error as NodeJS.ErrnoException | undefined;
+  if (error !== undefined && error.code === "ETIMEDOUT") {
+    throw new Error(
+      `make ${args.join(" ")} timed out after ${CHILD_TIMEOUT_MS} ms ` +
+        `(signal=${String(result.signal)}, error=${error.message}); ` +
+        `stdout=${stdout.length}B stderr=${stderr.length}B`,
+    );
+  }
   return { code: result.status ?? -1, stdout, stderr, all: `${stdout}${stderr}` };
 }
 
@@ -152,6 +172,31 @@ describe("help and the default target", () => {
       "all",
       "clean",
       "clean-all",
+      // Targets the docs cite as public entry points, so `make help` must list
+      // them: a target that works while being absent from the list contradicts
+      // the instruction "use make help as the interface".
+      "cli-check",
+      "dsh-bundle",
+      "dsh-bundle-check",
+      "product-check",
+      "client-check",
+      "maintenance-check",
+      "environment-check",
+      "store-acceptance-check",
+      "native-acceptance-check",
+      "source-acceptance-check",
+      "fixture-test",
+      "matrix-check",
+      "production-check",
+      "runtime-setup",
+      "typecheck-wait-host",
+      "wait-host-check",
+      "wait-runtime-check",
+      "pack-dsh-agent-wait",
+      "check-upstream",
+      "archive-owner-help",
+      "archive-owner-status",
+      "archive-owner-call",
     ]) {
       expect(stdout).toMatch(new RegExp(`^  ${target}\\s+\\S`, "m"));
     }
@@ -179,9 +224,12 @@ describe("check — the default offline gate", () => {
     const { code, stdout } = await make(["check"]);
     expect(code).toBe(0);
     expect(stdout).toContain("check: ok");
+    // The gate now also proves type coverage, which compiles both plain programs;
+    // that is real work, so the assertion is on the outcome rather than on speed.
+    expect(stdout).toContain("check: every maintained TypeScript file is in a compiled program");
     // Nothing generated: the gate is read-only.
     expect(existsSync(join(fixture, "build"))).toBe(false);
-  });
+  }, 120_000);
 
   test("fails with a setup pointer when dependencies are missing", async () => {
     const bare = await mkdtemp(join(tmpdir(), "makefile-bare-"));
@@ -408,10 +456,10 @@ describe("loader-check declares ESM in its scratch directory", () => {
     if (options.probe === true) {
       // The guard only requires the directory to exist; resolution still fails
       // further down because the real Loader packages are not installed here.
-      await mkdir(join(install, "node_modules/dsh-ensemble-probe"), { recursive: true });
+      await mkdir(join(install, "node_modules/dsh-ensemble"), { recursive: true });
       await writeFile(
-        join(install, "node_modules/dsh-ensemble-probe/package.json"),
-        `${JSON.stringify({ name: "dsh-ensemble-probe", version: PROBE_VERSION })}\n`,
+        join(install, "node_modules/dsh-ensemble/package.json"),
+        `${JSON.stringify({ name: "dsh-ensemble", version: PACKAGE_VERSION })}\n`,
       );
     }
     return install;
@@ -453,10 +501,10 @@ describe("loader-check declares ESM in its scratch directory", () => {
       expect(code).toBe(2);
       // The remedy, in the order it must be run.
       expect(all).toContain("make pack-dsh");
-      expect(all).toContain("dsh-ensemble-probe");
+      expect(all).toContain("dsh-ensemble");
       expect(all).toContain("npm install --ignore-scripts");
       // The guard names the missing package and refuses before running.
-      expect(all).toContain("no dsh-ensemble-probe installed");
+      expect(all).toContain("no dsh-ensemble installed");
       // The bare resolution failure must not be what the user reads.
       expect(all).not.toContain("ERR_MODULE_NOT_FOUND");
       expect(all).not.toContain("at defaultResolve");
@@ -477,7 +525,7 @@ describe("loader-check declares ESM in its scratch directory", () => {
     expect(code).toBe(2);
     expect(all).toContain(`@deepseek-ai/dsh@${DEFAULT_DSH_VERSION}`);
     expect(all).toContain("make pack-dsh");
-    expect(all).toContain("dsh-ensemble-probe");
+    expect(all).toContain("dsh-ensemble");
   });
 
   test("the scratch directory is cleaned up even when the Loader fails", async () => {
@@ -500,7 +548,7 @@ describe("loader-check declares ESM in its scratch directory", () => {
     }
     const { code, all } = await make(["loader-check", `INSTALL_DIR=${installDir}`]);
     expect(code).toBe(0);
-    expect(all).toContain("OK dsh-ensemble-probe via real Loader");
+    expect(all).toContain("OK dsh-ensemble via real Loader");
   }, 300_000);
 });
 
@@ -514,21 +562,28 @@ describe("gates fail closed; diagnose observes", () => {
     expect(all).toContain("UNVERIFY");
     // The gate must not be talked out of its exit code by its own summary text.
     expect(all).not.toContain("== exit code 0 (partially unverified)");
-  });
+    // Explicit budget: the child is a real subprocess and bun's 5 s default would kill
+    // it mid-run, emptying the captured output (see `make()` for the measurement).
+  }, CHILD_TIMEOUT_MS + TEST_SLACK_MS);
 
   test("isolation-check against a directory that is not an install fails", async () => {
     // Constructed here rather than borrowing a machine path: the point is that an
     // INSTALL_DIR was supplied and could not be used.
     const notAnInstall = await mkdtemp(join(tmpdir(), "not-an-install-"));
-    const { code, all } = await make(["isolation-check", `INSTALL_DIR=${notAnInstall}`]);
-    expect(code).toBe(2);
-    // The gate names the supplied directory as unusable rather than quietly
-    // measuring something else, and says plainly that nothing was verified.
-    expect(all).toContain("CONFIG ERROR");
-    expect(all).toContain("nothing was verified");
-    expect(all).toContain("UNVERIFIED");
-    await rm(notAnInstall, { recursive: true, force: true });
-  });
+    try {
+      const { code, all } = await make(["isolation-check", `INSTALL_DIR=${notAnInstall}`]);
+      expect(code).toBe(2);
+      // The gate names the supplied directory as unusable rather than quietly
+      // measuring something else, and says plainly that nothing was verified.
+      expect(all).toContain("CONFIG ERROR");
+      expect(all).toContain("nothing was verified");
+      expect(all).toContain("UNVERIFIED");
+    } finally {
+      // Cleanup in `finally`: a failing assertion (or a throw from `make()` on timeout)
+      // must not leave the temporary directory behind.
+      await rm(notAnInstall, { recursive: true, force: true });
+    }
+  }, CHILD_TIMEOUT_MS + TEST_SLACK_MS);
 
   test("isolation-check against a usable install runs every probe", async () => {
     const installDir = process.env.MAKE_TEST_INSTALL_DIR;
@@ -661,16 +716,16 @@ describe("type coverage is a gate, not a claim", () => {
 describe("release doors", () => {
   test("package-check is the offline aggregate and needs no INSTALL_DIR", async () => {
     const { code, all } = await make(["package-check"]);
-    expect(code).toBe(0);
+    expect(code, all).toBe(0);
     // All four offline steps ran, in order, and the door said what it covered.
     expect(all).toContain("check: ok");
     expect(all).toContain("pass");
     expect(all).toContain("package-check: ok (offline; Host gates not included)");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-${PACKAGE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
-  }, 120_000);
+  }, 300_000);
 
   test("release-check without INSTALL_DIR fails and asks for Host verification", async () => {
     const { code, all } = await make(["release-check"]);
@@ -698,7 +753,7 @@ describe("release doors", () => {
     expect(all).not.toContain("release-check: ok");
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
-  }, 120_000);
+  }, 300_000);
 
   test("no target reaches a green release door by skipping the Host gates", async () => {
     // A default-green release door was the defect this split removed. Assert the
@@ -707,8 +762,11 @@ describe("release doors", () => {
     expect(makefile).not.toContain("SKIPPED host-check");
     expect(makefile).not.toContain("were NOT verified");
 
-    // The strict door's prerequisites include the Host gate and the install check.
-    const line = makefile.split("\n").find((entry) => entry.startsWith("release-check:"));
+    // The strict door's prerequisites include the Host gate and the install
+    // check. The list may be wrapped over several lines with backslashes, so it
+    // is joined first: this assertion is about what the target depends on, not
+    // about how the Makefile is formatted.
+    const line = prerequisites(makefile, "release-check");
     expect(line).toBeDefined();
     expect(line).toContain("require-install-dir");
     expect(line).toContain("host-check");
@@ -718,11 +776,79 @@ describe("release doors", () => {
     // It packs all three packages, so gating only the ensemble probe would let
     // the door go green while shipping a wait plugin nobody verified.
     const makefile = await readMakefile();
-    const line = makefile.split("\n").find((entry) => entry.startsWith("release-check:"));
+    const line = prerequisites(makefile, "release-check");
     expect(line).toBeDefined();
     expect(line).toContain("pack");
     expect(line).toContain("wait-host-check");
     expect(line).toContain("host-check");
+    // And it now verifies the installed product, not only the Loader.
+    expect(line).toContain("production-check");
+  });
+
+  test("the strict door runs the native families and the live CLI case", async () => {
+    // Offline `bun test` skips 92 tests for want of an install, which is correct
+    // there and unacceptable as a release claim. `runtime-test-check` runs them and
+    // `live-cli-test` runs the one case that must never be left to "skipped unless
+    // somebody exports two variables". Both must be unconditional prerequisites:
+    // a gate that can be dropped when it is inconvenient is not a gate.
+    const makefile = await readMakefile();
+    const line = prerequisites(makefile, "release-check");
+    expect(line).toBeDefined();
+    expect(line).toContain("runtime-test-check");
+    expect(line).toContain("live-cli-test");
+  });
+
+  test("the live CLI target owns the Host and refuses to pass on a skip", async () => {
+    const makefile = await readMakefile();
+    // It starts the Host itself rather than taking a hand-passed origin, so a release
+    // cannot claim the case ran while the wiring was only "planned".
+    expect(makefile).toContain("live-cli-test:");
+    expect(makefile).toContain("scripts/verify-dsh-live-cli.ts");
+    // The gate must depend on the pinned artifact, like every other release gate.
+    const line = prerequisites(makefile, "live-cli-test");
+    expect(line).toBeDefined();
+    expect(line).toContain("require-package-sha");
+  });
+
+  test("the strict door runs the browser and cross-container gates unconditionally", async () => {
+    // A release conclusion may not rest on "we did not run those today". Both
+    // gates are plain prerequisites of the door, and neither may be wrapped in a
+    // make conditional: `$(if $(BROWSER),client-check)` would let a machine
+    // without a browser print a green release check.
+    const makefile = await readMakefile();
+    const line = prerequisites(makefile, "release-check");
+    expect(line).toContain("client-check");
+    expect(line).toContain("auth-ui-check");
+    // The source world is one target now: it starts the container, runs the
+    // cross-container read and stops the container on every exit path, so a CI
+    // step cannot leak it or skip it.
+    expect(line).toContain("source-acceptance-sidecar-check");
+    // The live maintenance run and the independent replica suite are unconditional
+    // too: the engine regression and the typed replica cases are their own gates.
+    expect(line).toContain("maintenance-live-check");
+    expect(line).toContain("replica-acceptance-check");
+    // The complete type claim: both plain programs, both runtime programs and the
+    // closure check that no maintained file is in no program.
+    expect(line).toContain("typecheck-strict");
+    expect(line).not.toMatch(/\$\(if \$\(BROWSER\)/);
+    expect(line).not.toMatch(/\$\(if \$\(SOURCE_CHECK\)/);
+
+    // And the door's own report may not hedge about what it skipped.
+    const body = ruleBody(makefile, "release-check");
+    expect(body).not.toContain("NOT verified here");
+    expect(body).toContain("cross-container source world");
+    expect(body).toContain("real browser");
+  });
+
+  test("the browser and source gates fail closed, so the door cannot go green without them", async () => {
+    const makefile = await readMakefile();
+    // Each gate refuses at exit 2 with the command that supplies its fixture.
+    expect(ruleBody(makefile, "client-check")).toContain("require-browser");
+    expect(ruleBody(makefile, "client-check")).toContain("require-slots");
+    const source = ruleBody(makefile, "source-acceptance-check");
+    expect(source).toContain("ENSEMBLE_SOURCE_TEST_TOKEN");
+    expect(source).toContain("ENSEMBLE_SOURCE_TEST_URL");
+    expect(source).toContain("was not run");
   });
 
   test("help distinguishes the two doors and marks the strict one", async () => {
@@ -735,10 +861,19 @@ describe("release doors", () => {
     expect(packageLine).toContain("no Host gates");
 
     expect(releaseLine).toBeDefined();
-    expect(releaseLine).toContain("[needs INSTALL_DIR]");
+    // The door needs an isolated install *and* the two fixtures the strict
+    // contract requires; the help line names all of them, so a reader cannot
+    // mistake it for a run that only needs INSTALL_DIR.
+    // The door's prerequisites grew with the strict contract: the Client program
+    // also needs the published slot types (CLIENT_TYPES) beside the browser
+    // (BROWSER), the static slot package (SLOTS) and the cross-container fixture.
+    for (const requirement of ["INSTALL_DIR", "BROWSER", "SLOTS", "CLIENT_TYPES", "source fixture"]) {
+      expect(releaseLine).toContain(requirement);
+    }
     expect(releaseLine).toContain("strict release door");
-    expect(releaseLine).toContain("Host types");
-    expect(releaseLine).toContain("real Loader");
+    expect(releaseLine).toContain("browser UI");
+    expect(releaseLine).toContain("live maintenance run");
+    expect(releaseLine).toContain("cross-container source world");
     // The old, misleading wording is gone.
     expect(releaseLine).not.toContain("only when INSTALL_DIR is set");
   });
@@ -785,27 +920,157 @@ describe("install-smoke runs without a TTY", () => {
 });
 
 describe("CI drives make, not package scripts", () => {
-  test("every workflow step runs make, and none runs a package script", async () => {
-    const workflow = await readFile(join(REPO_ROOT, ".github/workflows/ensemble-content.yml"), "utf8");
-    // Comments may name the commands this workflow deliberately does not use;
-    // only executable lines are the claim under test.
-    const executable = workflow
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("#"))
-      .join("\n");
-    const runs = workflow
-      .split("\n")
-      .filter((line) => line.trimStart().startsWith("run:"))
-      .map((line) => line.slice(line.indexOf("run:") + 4).trim());
-
-    expect(runs.length).toBeGreaterThan(0);
-    for (const command of runs) {
-      expect(command).toMatch(/^make \S/);
+  /**
+   * Split a workflow into the commands each `run:` actually executes.
+   *
+   * A `run:` value can be a single line or a YAML block scalar (`run: |`). The
+   * earlier version of this test read `run:` lines literally, so a block scalar
+   * produced the string "|" and the assertion was about YAML syntax rather than
+   * about what CI runs. Both forms are legitimate; what must hold is the set of
+   * *commands* that come out of them.
+   *
+   * Returns one entry per workflow file so the caller can assert over all of
+   * them; a second workflow added later cannot quietly escape the check.
+   */
+  async function workflowRuns(path: string): Promise<{ commands: string[]; executable: string }> {
+    const lines = (await readFile(path, "utf8")).split("\n");
+    const commands: string[] = [];
+    const executableLines: string[] = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      if (!line.trimStart().startsWith("#")) executableLines.push(line);
+      const match = /^(\s*)-\s+run:\s*(.*)$/.exec(line) ?? /^(\s*)run:\s*(.*)$/.exec(line);
+      if (match === null) continue;
+      const [, indent, value] = match;
+      if (value !== undefined && value !== "|" && value !== ">" && value.trim() !== "") {
+        commands.push(value.trim());
+        continue;
+      }
+      // Block scalar: every following line indented deeper belongs to the script.
+      const baseIndent = indent!.length;
+      for (index += 1; index < lines.length; index += 1) {
+        const scriptLine = lines[index]!;
+        if (scriptLine.trim() === "") continue;
+        const scriptIndent = scriptLine.length - scriptLine.trimStart().length;
+        if (scriptIndent <= baseIndent) {
+          index -= 1;
+          break;
+        }
+        const command = scriptLine.trim();
+        if (!command.startsWith("#")) commands.push(command);
+      }
     }
-    expect(runs.some((command) => command.startsWith("make setup"))).toBe(true);
-    expect(executable).not.toMatch(/\b(npm|bun)\s+run\b/);
-    expect(executable).not.toMatch(/\bbun test\b/);
-    expect(executable).not.toMatch(/\bbun install\b/);
+    return { commands, executable: executableLines.filter((line) => !line.trimStart().startsWith("#")).join("\n") };
+  }
+
+  const WORKFLOWS = [".github/workflows/ensemble-content.yml"];
+
+  /**
+   * Every step in a workflow, with its name, its `run:` script and whether it is
+   * conditional.
+   *
+   * Steps are the unit a reader reasons about ("the browser step"), so they are
+   * the unit this test checks. A `run:` may be one line or a block scalar; both
+   * arrive here as the script text.
+   */
+  async function workflowSteps(path: string): Promise<{ name: string; script: string; conditional: boolean }[]> {
+    const text = await readFile(path, "utf8");
+    const steps: { name: string; script: string; conditional: boolean }[] = [];
+    const parts = text.split(/\n      - name: /).slice(1);
+    for (const part of parts) {
+      const name = part.split("\n")[0]!.trim();
+      const raw = /\n        run: ([\s\S]*?)(?=\n      - name: |\n  [a-z]|$)/.exec(part)?.[1]?.trim() ?? "";
+      // `run: |` is a block scalar: drop the marker and join the script's lines so
+      // the assertion is about the command, not about YAML indentation.
+      const script = raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "" && line !== "|" && line !== ">")
+        .join(" ")
+        .trim();
+      const conditional = /\n        if: /.test(part);
+      steps.push({ name, script, conditional });
+    }
+    return steps;
+  }
+
+  /**
+   * Steps that legitimately do not run `make`.
+   *
+   * Each is provisioning for a gate rather than a gate: the browser build and its
+   * fonts (CI-only dependencies), the container runtime check, the derived release
+   * matrix and the pinned candidate. Naming them means adding one is a deliberate
+   * edit; a permissive pattern would let a gate become a shell block unnoticed.
+   */
+  const NOT_GATES = new Set([
+    "Install Bun",
+    "Install Node",
+    "Check out repository",
+    "Install the locked development dependencies",
+    "Install browser runtime, fonts and container runtime",
+    "Derive the release matrix from the maintained support declarations",
+    "Pin the candidate artifact by sha256",
+    "Refuse a caller-supplied hash that does not match the packed bytes",
+    "Retrieve the pinned candidate",
+    "Prove the retrieved candidate is the pinned byte",
+    "Retain the pinned candidate and the local package set",
+    "Retain the evidence this leg produced",
+    "Confirm every leg ran and every artifact was retained",
+    "Report the pinned artifact",
+  ]);
+
+  test("every workflow step is a make target or a named provisioning step", async () => {
+    for (const path of WORKFLOWS) {
+      const steps = await workflowSteps(join(REPO_ROOT, path));
+      expect(steps.length, path).toBeGreaterThan(0);
+      for (const step of steps) {
+        const isMake = /^make \S/.test(step.script);
+        const isNamed = NOT_GATES.has(step.name);
+        expect(isMake || isNamed, `${path}: ${step.name} -> ${step.script.split("\n")[0]}`).toBe(true);
+        // A conditional step may only be artifact retention or the caller's hash
+        // check. A gate that can be skipped is not a gate.
+        if (step.conditional) {
+          expect(step.name, `${path}: ${step.name} is conditional`).toMatch(/Retain|Refuse a caller-supplied/);
+        }
+      }
+      expect(steps.some((step) => step.script.startsWith("make setup")), path).toBe(true);
+      // A workflow made only of provisioning steps would satisfy every rule above
+      // while verifying nothing. The gates are the reason the file exists.
+      const gates = steps.filter((step) => /^make \S/.test(step.script));
+      expect(gates.length, path).toBeGreaterThan(8);
+      // And the strict type claim is one of them, so the closure check cannot be
+      // dropped from CI without failing this test.
+      expect(steps.some((step) => /make typecheck-strict/.test(step.script)), path).toBe(true);
+    }
+  });
+
+  test("no workflow step runs a package script, a test runner, or an installer directly", async () => {
+    for (const path of WORKFLOWS) {
+      const { executable } = await workflowRuns(join(REPO_ROOT, path));
+      // Installs, tests and packaging go through make, which is what makes the
+      // local and remote runs the same evidence. These four spellings are the
+      // ways that guarantee is usually lost.
+      expect(executable, path).not.toMatch(/\b(npm|bun)\s+run\b/);
+      expect(executable, path).not.toMatch(/\bbun test\b/);
+      expect(executable, path).not.toMatch(/\bbun install\b/);
+      expect(executable, path).not.toMatch(/\bnpm (install|pack)\b/);
+      expect(executable, path).not.toMatch(/\bnpx /);
+    }
+  });
+
+  test("the native legs run the whole gate set, with no per-plugin conditional", async () => {
+    const workflow = await readFile(join(REPO_ROOT, WORKFLOWS[0]!), "utf8");
+    // A matrix leg that skips gates reports a green check that verified less than
+    // its name says. Every per-release leg runs the same set.
+    const native = workflow.slice(workflow.indexOf("  native:"));
+    expect(native).toContain("make runtime-setup");
+    expect(native).toContain("make host-check");
+    expect(native).toContain("make wait-host-check");
+    expect(native).toContain("make wait-runtime-check");
+    expect(native).toContain("make production-check");
+    // The only remaining `if:` on a gate step may be `always()` for artifact
+    // upload; a conditional gate is what this test exists to prevent.
+    expect(native).not.toMatch(/if:\s*matrix\.(plugin|version)/);
   });
 });
 
@@ -853,7 +1118,7 @@ describe("parallel safety", () => {
     expect(code).toBe(0);
     expect(all).not.toContain("Error");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-${PACKAGE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
   }, 60_000);
@@ -863,10 +1128,10 @@ describe("parallel safety", () => {
     expect(code).toBe(0);
     expect(all).toContain("check: ok");
     expect(existsSync(join(fixture, "build/pack/omp/vcup-skills-0.2.0.tgz"))).toBe(true);
-    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-probe-${PROBE_VERSION}.tgz`))).toBe(true);
+    expect(existsSync(join(fixture, `build/pack/dsh/dsh-ensemble-${PACKAGE_VERSION}.tgz`))).toBe(true);
 
     await rm(join(fixture, "build"), { recursive: true, force: true });
-  }, 120_000);
+  }, 300_000);
 });
 
 /**
@@ -879,15 +1144,43 @@ async function readMakefile(): Promise<string> {
   return await readFile(join(REPO_ROOT, "Makefile"), "utf8");
 }
 
+/**
+ * The prerequisites of one target, with line continuations joined.
+ *
+ * A wrapped prerequisite list is ordinary Makefile style; reading only the first
+ * physical line would make a dependency assertion depend on formatting instead
+ * of on what the target actually runs.
+ */
+function prerequisites(makefile: string, target: string): string {
+  const lines = makefile.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`${target}:`));
+  if (start === -1) throw new Error(`target not found: ${target}`);
+  let joined = "";
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const continues = line.endsWith("\\");
+    joined += `${line.replace(/\\$/, "").trim()} `;
+    if (!continues) break;
+  }
+  return joined;
+}
+
 /** Body of one target, up to the next rule. */
 function ruleBody(makefile: string, target: string): string {
   const lines = makefile.split("\n");
   const start = lines.findIndex((line) => line.startsWith(`${target}:`));
   if (start === -1) throw new Error(`target not found: ${target}`);
   const body: string[] = [];
-  for (let index = start; index < lines.length; index += 1) {
+  // Prerequisite lines may be folded with trailing backslashes; they belong to
+  // the rule header, so skip past them before looking for the recipe body.
+  let index = start;
+  for (; index < lines.length; index += 1) {
+    body.push(lines[index]);
+    if (!lines[index].endsWith("\\")) break;
+  }
+  for (index += 1; index < lines.length; index += 1) {
     const line = lines[index];
-    if (index > start && line !== "" && !line.startsWith("\t") && !line.startsWith("#")) break;
+    if (line !== "" && !line.startsWith("\t") && !line.startsWith("#")) break;
     body.push(line);
   }
   return body.join("\n");
@@ -960,7 +1253,7 @@ describe("owner archive wrapper", () => {
     const makefile = await readMakefile();
     const body = ruleBody(makefile, "archive-owner-help");
     // bin/ and lib/ import @deepseek-ai/cordis, which only an install provides.
-    expect(body).toContain("node_modules/dsh-ensemble-probe/bin/ensemble-archive.js");
+    expect(body).toContain("node_modules/dsh-ensemble/bin/ensemble-archive.js");
     expect(body).toContain("require-install-dir");
   });
 

@@ -286,7 +286,7 @@ export function installRelease(
   // A probe-private peer copy is the other half of the mixed shape: the host is
   // consistent, but the plugin would load a different release than the host it
   // runs in. Read it from the probe's own nested node_modules, if any.
-  const probeDir = join(installDir, 'node_modules', 'dsh-ensemble-probe', 'node_modules');
+  const probeDir = join(installDir, 'node_modules', 'dsh-ensemble', 'node_modules');
   const shadow: ReleaseReading[] = existsSync(probeDir)
     ? DSH_RELEASE_PACKAGES.flatMap((name) => {
         const manifest = join(probeDir, name, 'package.json');

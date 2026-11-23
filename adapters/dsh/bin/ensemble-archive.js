@@ -43,13 +43,31 @@ import { connect, TransportFailure } from "../lib/transport.bundle.mjs";
 /** Namespace the plugin registers its owner Remote under. */
 const NAMESPACE = "ensembleArchive";
 
-/** Methods the Remote exposes, and whether they take a request body. */
+/**
+ * Methods the Remote exposes, and whether they take a request body.
+ *
+ * `retired: true` entries stay listed so an old script gets a precise refusal,
+ * but they are refused by this client **before any connection is opened**: a
+ * retired entry must not reach a Host and create a v1 archive.
+ */
 const METHODS = {
-  status: { requestRequired: false },
-  initialize: { requestRequired: true },
-  bind: { requestRequired: true },
-  readBack: { requestRequired: true },
+  projects: { requestRequired: false },
+  query: { requestRequired: true },
+  manage: { requestRequired: true },
+  choose: { requestRequired: true },
+  approve: { requestRequired: true },
+  environment: { requestRequired: true },
+  watch: { requestRequired: true },
+  status: { requestRequired: false, retired: true },
+  initialize: { requestRequired: true, retired: true },
+  bind: { requestRequired: true, retired: true },
+  readBack: { requestRequired: true, retired: true },
 };
+
+/** Supported methods, for help and error text. */
+const SUPPORTED = Object.keys(METHODS).filter((name) => !METHODS[name].retired);
+/** Retired methods, for help and error text. */
+const RETIRED = Object.keys(METHODS).filter((name) => METHODS[name].retired);
 
 /** Default Host origin: the web profile's default port on loopback. */
 const DEFAULT_URL = "http://127.0.0.1:3731";
@@ -60,7 +78,18 @@ const COOKIE_ENV = "ENSEMBLE_ARCHIVE_COOKIE";
 const USAGE = `ensemble-archive — call the owner archive Remote on a running DSH Host
 
 Usage:
-  ensemble-archive <${Object.keys(METHODS).join("|")}> [options]
+  ensemble-archive <${SUPPORTED.join("|")}> [options]
+
+Create and change an archive with \`manage\`:
+  manage --request '{"action":"initialize","expected_revision":"absent","operation_id":"…","payload":{…}}'
+  manage --request '{"action":"bind","project_id":"…","expected_revision":"<40-hex>","operation_id":"…","payload":{…}}'
+Read state with \`projects\`, \`query\` or \`environment\`.
+
+Retired in the 1.0 package: ${RETIRED.join(", ")}.
+They are refused without contacting the Host. Creation moved to \`manage\`;
+reads moved to \`projects\`/\`query\`. A 0.3.0 archive is migrated only by an
+explicit owner flow: plan a \`legacy_upgrade\` through \`manage\`, then commit it.
+The old repository, its head and its history are never written by this package.
 
 Options:
   --url <origin>        Host origin (default ${DEFAULT_URL})
@@ -210,6 +239,32 @@ function readCredential(options) {
   return looksLikeSessionCookie(cookie) ? cookie : "";
 }
 
+/**
+ * The message shown for a retired method.
+ *
+ * Exit code 2 (usage), not 1 (Host refused), on purpose: nothing was sent, so a
+ * script branching on the exit code learns this client did not even try, and the
+ * text names the replacement.
+ * @param method - the retired method that was requested.
+ * @returns the operator-facing explanation.
+ */
+function retiredMessage(method) {
+  const replacement =
+    method === "initialize" || method === "bind"
+      ? 'Create or rebind an archive with `manage`: {"action":"initialize",…} or {"action":"bind",…}.'
+      : 'Read archive state with `projects` or `query` (kinds `context`, `object`, `artifact`).';
+  return [
+    `ensemble-archive: ${method} is retired in the 1.0 package; nothing was sent.`,
+    "",
+    `  ${replacement}`,
+    "",
+    "  A 0.3.0 archive is migrated only by an explicit owner flow:",
+    '    manage {"action":"plan_maintenance","payload":{"kind":"legacy_upgrade","source_handle":"…","target_format":"ensemble-archive/v2","reason":"…"}}',
+    '    manage {"action":"upgrade","payload":{…}}   # after review, backup and stopping the old writer',
+    "  The old repository, its head and its history are never written by this package.",
+  ].join("\n");
+}
+
 /** The message shown when there is no credential at all. */
 function noCredentialMessage() {
   return [
@@ -259,6 +314,14 @@ async function main() {
   if (cookie === "") {
     process.stderr.write(`ensemble-archive: ${noCredentialMessage()}\n`);
     return 3;
+  }
+
+  // A retired entry is refused here, before a connection exists: reaching a Host
+  // with an old payload shape is exactly what 1.0 must not do. Exit 2 (usage)
+  // rather than 1, because nothing was sent.
+  if (METHODS[method].retired) {
+    process.stderr.write(`${retiredMessage(method)}\n`);
+    return 2;
   }
 
   let connection;

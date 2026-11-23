@@ -12,7 +12,7 @@
  *   cd "$DSH_PROBE_HOME" && node loader-check.ts        # Node ≥ 22.18 strips types
  *
  * Environment:
- *   DSH_PROBE_PACKAGE  package name to mount (default `dsh-ensemble-probe`)
+ *   DSH_PROBE_PACKAGE  package name to mount (default `dsh-ensemble`)
  *   DSH_PROBE_TMP      scratch directory for temporary artifacts (default `.probe-check`)
  *
  * The generated `cordis.yml` files must live under a directory whose
@@ -36,7 +36,7 @@ import { boot, loadOverlayPatches } from "@deepseek-ai/dsh-app-boot";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-skill";
 
-const PACKAGE = process.env.DSH_PROBE_PACKAGE ?? "dsh-ensemble-probe";
+const PACKAGE = process.env.DSH_PROBE_PACKAGE ?? "dsh-ensemble";
 const failures: string[] = [];
 
 function check(condition: boolean, name: string, detail = ""): void {
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   const skillDir = join(packageDir, "skills/ensemble");
 
   // ── Scenario 1: the installed package as a Loader row ────────────────────
-  const ctx = await scenario("installed", scratch, [...BASE_ROWS, { id: "ensemble-probe", name: PACKAGE }]);
+  const ctx = await scenario("installed", scratch, [...BASE_ROWS, { id: "ensemble", name: PACKAGE }]);
   const skills = ctx.skills;
   const tools = ctx.tools;
 
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     "skill is not model-invocable (frontmatter disable-model-invocation: true)",
     JSON.stringify(ensemble?.invocation),
   );
-  check(ensemble?.provider === "ensemble-probe", "skill provider name", ensemble?.provider);
+  check(ensemble?.provider === "ensemble", "skill provider name", ensemble?.provider);
   check(
     ensemble?.resourceBase?.kind === "opaque",
     "skill resource base is opaque (no host path)",
@@ -121,8 +121,8 @@ async function main(): Promise<void> {
   check(definition !== undefined, "skill body loads by name");
   check(definition?.content === expectedBody, "skill body equals SKILL.md without frontmatter");
   check(
-    (definition?.content ?? "").includes("Capability status: pre-release method resource"),
-    "skill body keeps the pre-release capability status section",
+    (definition?.content ?? "").includes("ensemble_work"),
+    "skill body describes the managed domain tools",
   );
 
   check(tools.get("ensemble_reference") !== undefined, "tool ensemble_reference is registered");
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
   await ctx.fiber.dispose();
   const afterDispose = await skills.list({}).catch(() => []);
   check(
-    !afterDispose.some((skill) => skill.provider === "ensemble-probe"),
+    !afterDispose.some((skill) => skill.provider === "ensemble"),
     "disposing the plugin removes its skill provider",
   );
   check(tools.get("ensemble_reference") === undefined, "disposing the plugin removes its tool");
@@ -210,11 +210,11 @@ async function main(): Promise<void> {
   // state and the surviving provider list.
   const duplicateCtx = await scenario("duplicate", scratch, [
     ...BASE_ROWS,
-    { id: "ensemble-probe-a", name: PACKAGE },
-    { id: "ensemble-probe-b", name: PACKAGE },
+    { id: "ensemble-a", name: PACKAGE },
+    { id: "ensemble-b", name: PACKAGE },
   ]);
   const duplicateEntries = [...duplicateCtx.loader.entries()];
-  const failedRow = duplicateEntries.find((entry) => entry.id.endsWith("ensemble-probe-b"));
+  const failedRow = duplicateEntries.find((entry) => entry.id.endsWith("ensemble-b"));
   const failedMessage =
     (failedRow?.fiber as { _error?: { message?: string } } | undefined)?._error?.message ?? "";
   check(
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
   const patchedCtx = await boot("probe-check", baseConfig, overlay);
   const patchedSkills = await patchedCtx.skills.list({});
   check(
-    patchedSkills.some((skill) => skill.name === "ensemble" && skill.provider === "ensemble-probe"),
+    patchedSkills.some((skill) => skill.name === "ensemble" && skill.provider === "ensemble"),
     "the shipped bundle patch mounts the package",
     patchedSkills.map((skill) => skill.name).join(","),
   );

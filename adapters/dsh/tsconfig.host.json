@@ -1,7 +1,8 @@
 {
-  "//": "Type check for the Host entry modules that import @deepseek-ai/*: index.ts and loader-check.ts.",
-  "//why-separate": "The root tsconfig.json must not pull these files in: they need the published @deepseek-ai/* packages, which are not root dependencies. This program is compiled against a real isolated rc.4 install.",
-  "//usage": "bun adapters/dsh/typecheck-host.ts <isolated-install-dir> \u2014 copies this file beside that install and runs its tsc. Not part of `make typecheck`.",
+  "//": "The Host program: every maintained module that reaches a published DSH package through a Host entry, plus the tests that import those modules. Compiled beside a real isolated install by adapters/dsh/typecheck-host.ts; the root tsconfig.json deliberately does not pull them in, because it declares no DSH dependency and this project uses no stub, shim or any-facade for one.",
+  "//coverage": "scripts/check-type-coverage.ts --strict fails when a runtime-typed file is missing from this program or from adapters/dsh/tsconfig.client.json.",
+  "//paths": "Include paths are relative to this file's directory (adapters/dsh); the runner stages the same layout in its scratch tree.",
+  "//usage": "bun adapters/dsh/typecheck-host.ts <isolated-install-dir> [--client-types <dir>]",
   "compilerOptions": {
     "target": "ES2022",
     "lib": [
@@ -14,13 +15,28 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "allowJs": true,
     "types": [
-      "node"
+      "node",
+      "bun"
     ]
   },
   "include": [
+    "../../adapters/dsh-agent-wait/index.ts",
+    "../../adapters/dsh-agent-wait/loader-check.ts",
+    "../../scripts/verify-dsh-native-acceptance.test.ts",
+    "../../scripts/verify-dsh-native-acceptance.ts",
+    "environment/config.ts",
+    "environment/host.ts",
     "index.ts",
     "loader-check.ts",
-    "owner-remote.ts"
+    "native/destination-key.test.ts",
+    "native/dsh.ts",
+    "native/locations.ts",
+    "native/product.ts",
+    "native/replication.test.ts",
+    "native/replication.ts",
+    "owner-remote.ts",
+    "tools/index.ts"
   ]
 }

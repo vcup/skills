@@ -1,28 +1,34 @@
+import z from "@deepseek-ai/schemastery";
+import { rolePreferencesConfig } from "./environment/config.ts";
+import { createProduct, type ProductOptions } from "./native/product.ts";
 /**
- * DSH ensemble probe — a Host-only P1 technical probe.
+ * DSH ensemble — the installed Host entry.
  *
  * Supported DSH releases are declared once, in `./compatibility.ts`; the
  * package manifest's `engines.dsh` and every gate read that module.
  *
- * What this plugin does, and all it does:
+ * What this entry composes:
  *
- * 1. registers one **user-invocable** skill provider (`ensemble`) whose body is
- *    the generated DSH artifact bundled in this package;
- * 2. registers one model-facing tool, `ensemble_reference`, that reads back a
- *    fixed enumeration of packaged reference files;
- * 3. registers one **owner-only** management Remote (`ensembleArchive`) that
- *    initialises and reads back a versioned archive, running its Git in an
- *    isolated Host-local execution group.
+ * 1. one **user-invocable** skill provider (`ensemble`) whose body is the
+ *    generated DSH artifact bundled in this package;
+ * 2. the model-facing tools: `ensemble_reference` (a fixed enumeration of
+ *    packaged reference files) and, once the deployment's identity variables are
+ *    set, `ensemble_work`, `ensemble_learn`, `ensemble_read` and
+ *    `ensemble_upload` from `./tools`;
+ * 3. the **owner-only** management Remote (`ensembleArchive`), which also carries
+ *    project, query, management, choice, approval and environment methods for
+ *    the Client and the CLI.
  *
- * It still implements none of the managed product: no model-facing domain tool,
- * no grant/revoke/takeover, no learning publication, no Client/UI half, and no
- * model-selection policy. The owner Remote is the only write surface, and it
- * refuses any caller that is not an authenticated owner. The bundled method
- * text says the same thing in its `Capability status` section.
+ * Authority never comes from a request. The model tools derive their actor from
+ * the live native caller (`exec.agent` plus the registered Workspace and the
+ * deployment's execution-world mapping); the owner Remote takes its actor from
+ * the authenticated Remote invocation and refuses when that invocation is
+ * absent. The archive enforcement (current grants, authorization epoch, receipts)
+ * lives in `./store`, and the domain decisions live in `modules/ensemble`.
  *
- * Only this module imports `@deepseek-ai/*`; the parsing, allowlist and budget
- * logic live in dependency-free siblings so they are tested without a DSH
- * installation.
+ * Only this module (and its native siblings) import `@deepseek-ai/*`; the
+ * parsing, allowlist and budget logic live in dependency-free siblings so they
+ * are tested without a DSH installation.
  *
  * @module adapters/dsh
  */
@@ -39,7 +45,7 @@ import {
   SKILL_DIR,
   SKILL_FILE,
 } from "./meta.ts";
-import { createOwnerService, type OwnerServiceDeps } from "./owner-service.ts";
+import type { OwnerServiceDeps } from "./owner-service.ts";
 import { ARCHIVE_ROOT_ENV, type ProviderFactories } from "./archive.ts";
 import { LocalSubprocessRuntime } from "@deepseek-ai/dsh-subprocess-local";
 import { LocalSandboxProvider } from "@deepseek-ai/dsh-sandbox-local";
@@ -47,7 +53,7 @@ import { createOwnerRemote, OWNER_SERVICE_KEY } from "./owner-remote.ts";
 import { createReferenceReader, ReferenceError, type ReferenceContent } from "./reference.ts";
 import { createSkillProvider } from "./skill.ts";
 
-export const name = "ensemble-probe";
+export const name = "ensemble";
 export const inject = ["skills", "tools"];
 
 /**
@@ -170,43 +176,70 @@ export const ARCHIVE_WORLD_ENV = "DSH_ENSEMBLE_ARCHIVE_WORLD";
 /**
  * Register the skill provider, the reference tool, and the owner archive Remote.
  *
- * The owner surface is built here rather than per call so the isolated
- * Host-local group is a property of the installed plugin: if the group cannot be
- * built, the Remote exists and refuses, rather than disappearing and leaving a
- * caller to guess why.
+ * Version 1.0 mounts **one** archive: the v2 product executor created in
+ * `./native/product.ts`. The retired v1 store is not constructed here at all —
+ * not even as a writer behind the same `DSH_ENSEMBLE_ARCHIVE_ROOT`. Two stores
+ * reachable from one environment variable is the defect this shape removes: the
+ * old four-method Remote entries now refuse with a migration instruction (see
+ * `./owner-remote.ts`), so an old script fails loudly instead of quietly
+ * creating a second repository.
+ *
+ * `options.owner` remains only to let a test inject a *read-only* legacy view
+ * for migration diagnostics; it never becomes a write path in the installed
+ * composition.
  * @param ctx - plugin context.
- * @param options - installed skill directory, and provider factories for tests.
+ * @param options - installed skill directory, and injection points for tests.
  */
 export function applyWithOwner(
   ctx: Context,
-  options: ApplyOptions & { readonly owner?: Partial<OwnerServiceDeps> } = { skillDir: join(packageRoot(), SKILL_DIR) },
+  options: ApplyOptions & { readonly owner?: Partial<OwnerServiceDeps>; readonly product?: Partial<ProductOptions> } = { skillDir: join(packageRoot(), SKILL_DIR) },
 ): void {
   applyWith(ctx, options);
 
-  const archiveRoot = options.owner?.archiveRoot ?? process.env[ARCHIVE_ROOT_ENV] ?? "";
+  const archiveRoot = options.product?.root ?? options.owner?.archiveRoot ?? process.env[ARCHIVE_ROOT_ENV] ?? "";
   // The deployment states which execution world the archive runs in. Without
-  // that statement `bind` has nothing to compare a source against and refuses
-  // it; with it, only a source the deployment evidenced as the same world is
-  // bound. Neither value is derived from a path or from a Session cwd.
+  // that statement a source has nothing to be compared against and is refused;
+  // with it, only a source the deployment evidenced as this world is bound.
+  // Neither value is derived from a path or from a Session cwd.
   const world = process.env[ARCHIVE_WORLD_ENV];
-  const topology =
-    options.owner?.topology ??
-    (world === undefined || world.trim() === ""
-      ? undefined
-      : { archiveWorldIdentity: world.trim(), sourceWorlds: { [world.trim()]: true } });
-  const service = createOwnerService({
-    ctx: ctx as never,
-    archiveRoot,
-    // The plugin mounts the local providers itself: the archive must run in its
-    // own isolated Host-local group, so it cannot borrow whatever execution
-    // world the profile happens to compose. A deployment that does not provide
-    // them still gets a loaded plugin, and every owner call reports
-    // `storage_unavailable` rather than silently writing somewhere else.
-    factories: options.owner?.factories ?? localProviderFactories,
-    ...(topology === undefined ? {} : { topology }),
-    ...(options.owner ?? {}),
+  const configured = {
+    root: archiveRoot,
+    hostAuthorityId: options.product?.hostAuthorityId ?? process.env.DSH_ENSEMBLE_AUTHORITY_ID ?? "",
+    hostWorld: options.product?.hostWorld ?? world ?? "",
+    sourceWorld: options.product?.sourceWorld ?? process.env.DSH_ENSEMBLE_SOURCE_WORLD ?? "",
+    factories: options.product?.factories ?? options.owner?.factories ?? localProviderFactories,
+    ...(options.product?.sourceReadLink ? { sourceReadLink: options.product.sourceReadLink } : {}),
+  };
+  // The Remote is registered unconditionally so its retired entries can answer
+  // with a precise refusal even before the native services finish arriving.
+  // There is deliberately no v1 service argument: nothing on this wire can
+  // create or extend a v1 archive.
+  const remote = createOwnerRemote(ctx, undefined as never, OWNER_SERVICE_KEY, undefined, undefined);
+  const mountFiber = ctx.fiber;
+  ctx.inject(["agents", "subagents", "workingDirectory", "workspaceRegistry", "sessionQuery", "fs"], productContext => {
+    // A deployment that has not named its archive root, authority or execution
+    // worlds still gets a loaded plugin: the skill, the reference reader and the
+    // retired-entry refusals work, and the native tools report unavailability on
+    // use. That keeps an unconfigured install diagnosable instead of a boot
+    // failure that hides which variable is missing.
+    const missing = [
+      ["DSH_ENSEMBLE_ARCHIVE_ROOT", configured.root],
+      ["DSH_ENSEMBLE_AUTHORITY_ID", configured.hostAuthorityId],
+      ["DSH_ENSEMBLE_ARCHIVE_WORLD", configured.hostWorld],
+      ["DSH_ENSEMBLE_SOURCE_WORLD", configured.sourceWorld],
+    ].filter(([, value]) => value.trim() === "").map(([name]) => name);
+    if (missing.length > 0) {
+      // One line, no stack: this is an expected unconfigured state, not a crash.
+      ctx.logger.warn(`ensemble: native tools are unavailable until these deployment variables are set: ${missing.join(", ")}`);
+      return;
+    }
+    // A misconfigured deployment (for example the same world declared without a
+    // native Host path mapping) is a real fault: surface it at boot rather than
+    // letting every later owner call fail with a vaguer message.
+    const product = createProduct(productContext, { ...configured, mountFiber });
+    remote.productService = product.owner;
+    productContext.effect(() => () => { remote.productService = undefined; });
   });
-  createOwnerRemote(ctx, service, OWNER_SERVICE_KEY);
 }
 
 /**
@@ -234,7 +267,8 @@ export function apply(ctx: Context): void {
   applyWithOwner(ctx, { skillDir: join(packageRoot(), SKILL_DIR) });
 }
 
-export default { name, inject, apply };
+export const Config = z.object({ rolePreferences: rolePreferencesConfig });
+export default { name, inject, apply, Config };
 
 /**
  * Re-exported for the real-Loader verification script, which exercises the

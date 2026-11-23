@@ -9,7 +9,7 @@ import {
 } from "../adapters/dsh/compatibility.ts";
 import {
   OUTPUT_BUDGET_BYTES,
-  PROBE_VERSION,
+  PACKAGE_VERSION,
   REFERENCE_RESOURCES,
   SKILL_DIR,
   SKILL_FILE,
@@ -31,6 +31,21 @@ import {
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const roots: string[] = [];
+
+/**
+ * Timeout for the three tests that perform a real `stage()`.
+ *
+ * Each `stage()` emits with tsc and then runs `Bun.build`. Measured in this
+ * tree on this file: ~2.1-2.3s per stage, so a single-stage test lands around
+ * 4.2s and the two-stage test around 4.6s. That is 84-92% of Bun's 5000ms
+ * per-test default, which makes these inherently flaky rather than slow: the
+ * same unmodified file measured 4167ms (pass) and 5027ms (timeout) in two
+ * consecutive runs here. 30s is ~6x the observed worst case — enough that load
+ * cannot fail correct work, tight enough that a genuine hang still fails fast.
+ * Nothing is skipped and no assertion is relaxed; the bound is set on these
+ * three cases only, so unrelated hangs elsewhere keep the 5s default.
+ */
+const STAGING_TIMEOUT_MS = 30_000;
 
 async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "pack-dsh-"));
@@ -140,7 +155,7 @@ describe("bundled skill parsing", () => {
     expect(parsed.body).not.toContain("disable-model-invocation");
     // The DSH artifact carries its own capability status; the pure-skill and OMP
     // artifacts carry different path sections, so this asserts the DSH text.
-    expect(parsed.body).toContain("Capability status: pre-release method resource");
+    expect(parsed.body).toContain("ensemble_work");
   });
 
   test("matches the rc.4 filesystem-provider defaults for omitted keys", () => {
@@ -173,7 +188,7 @@ describe("pack staging", () => {
     expect(result.files.filter((path) => path.startsWith(`${SKILL_DIR}/`))).toHaveLength(6);
 
     const stagedSkill = await readFile(join(stagingDir, SKILL_DIR, SKILL_FILE), "utf8");
-    expect(stagedSkill).toContain("Capability status: pre-release method resource");
+    expect(stagedSkill).toContain("ensemble_work");
   });
 
   test("manifest digests match the staged bytes", async () => {
@@ -213,6 +228,27 @@ describe("pack staging", () => {
     expect(Object.keys(manifest.peerDependencies).every((name) => name.startsWith("@deepseek-ai/"))).toBe(true);
   });
 
+  test("every exported entry exists in the standalone package", async () => {
+    const stagingDir = join(await temporaryRoot(), "stage");
+    const result = await stage({ root: REPO_ROOT, stagingDir });
+    const manifest = result.manifest as { exports: Record<string, string> };
+    for (const [name, target] of Object.entries(manifest.exports)) {
+      expect(target.startsWith("./")).toBe(true);
+      expect(result.files, `export ${name} must exist without the source checkout`).toContain(target.slice(2));
+    }
+  });
+
+  // Staged twice: see STAGING_TIMEOUT_MS for why this case carries a bound.
+  test("the packaged entry is independent of temporary emission paths", async () => {
+    const first = join(await temporaryRoot(), "first");
+    const second = join(await temporaryRoot(), "second");
+    await stage({ root: REPO_ROOT, stagingDir: first });
+    await stage({ root: REPO_ROOT, stagingDir: second });
+    expect(await readFile(join(first, "index.js"), "utf8")).toBe(
+      await readFile(join(second, "index.js"), "utf8"),
+    );
+  }, STAGING_TIMEOUT_MS);
+
   test("package files name no other consumption path", async () => {
     const root = await temporaryRoot();
     const stagingDir = join(root, "stage");
@@ -221,7 +257,9 @@ describe("pack staging", () => {
     const forbidden = [/ensemble_state/, /\.ensemble\//, /npx skills/, /vcup\/skills/, /omp install/i];
     for (const path of ["README.md", "cordis.patch.yml", "package.json", "bundle-manifest.json"]) {
       const text = await readFile(join(stagingDir, path), "utf8");
-      for (const token of forbidden) expect(text).not.toMatch(token);
+      // Provenance is metadata, never an instruction to install another path.
+      const checked = path === "package.json" ? JSON.stringify({ ...JSON.parse(text), repository: undefined }) : text;
+      for (const token of forbidden) expect(checked).not.toMatch(token);
     }
   });
 
@@ -231,7 +269,7 @@ describe("pack staging", () => {
     const root = await temporaryRoot();
     const stagingDir = join(root, "stage");
     const sibling = join(root, "keep.txt");
-    await mkdir(stagingDir, { recursive: true });
+    await stage({ root: REPO_ROOT, stagingDir });
     await writeFile(join(stagingDir, "stale.md"), "old");
     await writeFile(sibling, "keep me");
 
@@ -239,19 +277,45 @@ describe("pack staging", () => {
     expect(result.files).not.toContain("stale.md");
     await expect(readFile(join(stagingDir, "stale.md"), "utf8")).rejects.toThrow();
     expect(await readFile(sibling, "utf8")).toBe("keep me");
+  }, STAGING_TIMEOUT_MS);
+
+  test("refuses an unrelated nonempty output directory without deleting it", async () => {
+    const stagingDir = join(await temporaryRoot(), "user-data");
+    await mkdir(stagingDir);
+    await writeFile(join(stagingDir, "keep.txt"), "user data");
+    await expect(stage({ root: REPO_ROOT, stagingDir })).rejects.toThrow(/unmanaged/);
+    expect(await readFile(join(stagingDir, "keep.txt"), "utf8")).toBe("user data");
+  });
+
+  test("refuses the source root as its output", async () => {
+    // A disposable source fixture: a broken guard must never delete the real checkout.
+    const root = await temporaryRoot();
+    await writeFile(join(root, "keep.txt"), "source");
+    await expect(stage({ root, stagingDir: root })).rejects.toThrow(/source|root/);
+    expect(await readFile(join(root, "keep.txt"), "utf8")).toBe("source");
+  });
+
+  test("refuses a symlinked output parent before following it", async () => {
+    const root = await temporaryRoot();
+    const outside = await temporaryRoot();
+    await symlink(outside, join(root, "alias"));
+    await expect(stage({ root: REPO_ROOT, stagingDir: join(root, "alias", "stage") })).rejects.toThrow(/symbolic link/);
+    await expect(readFile(join(outside, "stage", "package.json"))).rejects.toThrow();
   });
 
   test("the bundle patch names this package and nothing else", () => {
     const patch = bundlePatch();
-    expect(patch).toContain("dsh-ensemble-probe");
+    expect(patch).toContain("dsh-ensemble");
     expect(patch.match(/name:/g)).toHaveLength(1);
     expect(patch).not.toContain("dsh-client");
   });
 
-  test("the manifest declares probe status, not product status", () => {
-    const manifest = packageManifest([]) as { probe: { status: string }; description: string };
-    expect(manifest.probe.status).toBe("host-only-probe");
-    expect(manifest.description).toContain("Host-only DSH probe");
+  test("the manifest declares installed interfaces and an independently loadable Client", () => {
+    const manifest = packageManifest([]);
+    expect("probe" in manifest).toBe(false);
+    expect(manifest.ensemble.capabilities.modelTools).toEqual(["ensemble_work", "ensemble_learn", "ensemble_read", "ensemble_upload"]);
+    expect(manifest.dsh.client.platform).toBe("web");
+    expect(manifest.exports["./client"]).toBe("./client.js");
   });
 
   test("re-staging deterministically regenerates a modified staged file", async () => {
@@ -266,7 +330,7 @@ describe("pack staging", () => {
     const again = await stage({ root: REPO_ROOT, stagingDir });
     expect(again.files).toEqual(packageAllowlist());
     expect(await readFile(join(stagingDir, "cordis.patch.yml"), "utf8")).toBe(bundlePatch());
-  });
+  }, STAGING_TIMEOUT_MS);
 });
 
 describe("pack error surface", () => {
